@@ -19,8 +19,10 @@ from functools import wraps
 from pathlib import Path
 from typing import Optional
 
+import xml.etree.ElementTree as ET
+
 import anthropic
-import feedparser
+import requests
 import yfinance as yf
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -230,34 +232,66 @@ def format_quote(data: dict) -> str:
 
 # ---- Service RSS ----
 
+def _parse_rss(url: str, source_name: str, keyword: Optional[str]) -> list[dict]:
+    """Parse un flux RSS via requests + xml.etree.ElementTree (sans feedparser)."""
+    results = []
+    try:
+        resp = requests.get(url, timeout=10, headers={"User-Agent": "InvestBot/1.0"})
+        resp.raise_for_status()
+        root = ET.fromstring(resp.content)
+
+        # Namespaces courants dans les flux RSS/Atom
+        ns = {
+            "atom": "http://www.w3.org/2005/Atom",
+            "media": "http://search.yahoo.com/mrss/",
+        }
+
+        # Format RSS 2.0
+        items = root.findall(".//item")
+        # Format Atom
+        if not items:
+            items = root.findall(".//atom:entry", ns)
+
+        for item in items[:10]:
+            title_el = item.find("title") or item.find("atom:title", ns)
+            link_el = item.find("link") or item.find("atom:link", ns)
+            pub_el = item.find("pubDate") or item.find("published") or item.find("atom:published", ns)
+
+            title = (title_el.text or "").strip() if title_el is not None else ""
+            # Pour Atom, le lien est dans l'attribut href
+            if link_el is not None:
+                link = link_el.get("href") or (link_el.text or "").strip()
+            else:
+                link = ""
+            published = (pub_el.text or "").strip()[:16] if pub_el is not None else ""
+
+            if not title:
+                continue
+            if keyword and keyword.lower() not in title.lower():
+                continue
+
+            results.append({
+                "title": title,
+                "link": link,
+                "published": published,
+                "source": source_name,
+            })
+    except Exception as e:
+        logger.warning("Erreur RSS %s : %s", source_name, e)
+
+    return results
+
+
 async def fetch_news(keyword: Optional[str] = None, max_items: int = 5) -> list[dict]:
     """Agrège les news des 4 flux RSS, filtre par mot-clé si fourni."""
     articles = []
-
     loop = asyncio.get_event_loop()
 
     for source in RSS_SOURCES:
-        try:
-            feed = await loop.run_in_executor(
-                None, lambda url=source["url"]: feedparser.parse(url)
-            )
-            for entry in feed.entries[:10]:
-                title = entry.get("title", "")
-                link = entry.get("link", "")
-                published = entry.get("published", "")
-
-                # Filtrage par mot-clé (insensible à la casse)
-                if keyword and keyword.lower() not in title.lower():
-                    continue
-
-                articles.append({
-                    "title": title,
-                    "link": link,
-                    "published": published,
-                    "source": source["name"],
-                })
-        except Exception as e:
-            logger.warning("Erreur RSS %s : %s", source["name"], e)
+        items = await loop.run_in_executor(
+            None, lambda s=source: _parse_rss(s["url"], s["name"], keyword)
+        )
+        articles.extend(items)
 
     # Déduplication basique par titre
     seen = set()
