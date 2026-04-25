@@ -1,0 +1,21 @@
+# Variables d'environnement — NE JAMAIS COMMITTER
+.env
+
+# Données locales du bot
+alertes.json
+watchlist.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
