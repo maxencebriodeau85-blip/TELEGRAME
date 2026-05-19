@@ -57,7 +57,7 @@ RSI_SELL_MIN = 65
 MACD_FAST = 12
 MACD_SLOW = 26
 MACD_SIGNAL_PERIOD = 9
-DATA_INTERVAL = "1h"
+DATA_INTERVAL = "15m"   # Bougies 15 min → plus de signaux qu'en horaire
 DATA_PERIOD = "60d"
 
 # ---- Gestion du risque ----
@@ -436,7 +436,7 @@ def check_daily_loss_limit() -> bool:
 # ============================================================
 
 def run_strategy() -> None:
-    """Exécutée toutes les 30 min — analyse et passe les ordres si signal."""
+    """Exécutée toutes les 5 min — bougies 15m, signaux plus réactifs."""
     logger.info("=== Analyse des signaux ===")
 
     if not is_market_open():
@@ -608,7 +608,7 @@ def main() -> None:
         "cron",
         day_of_week="mon-fri",
         hour="9-15",
-        minute="*/30",
+        minute="*/5",   # Toutes les 5 minutes
         id="run_strategy",
         name="Analyse signaux",
     )
@@ -623,7 +623,7 @@ def main() -> None:
         name="Résumé journalier",
     )
 
-    logger.info("Scheduler actif — analyse toutes les 30 min (9h30–16h NY, lun–ven)")
+    logger.info("Scheduler actif — analyse toutes les 5 min (9h30–16h NY, lun–ven)")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
