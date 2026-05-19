@@ -4,6 +4,5 @@ anthropic==0.25.0
 APScheduler==3.10.4
 python-dotenv==1.0.1
 requests==2.31.0
-alpaca-py==0.20.0
 numpy>=1.24.0
 pandas>=1.5.0
