@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-TradingBot — Bot de trading automatique sur signaux techniques
-Actifs    : GLD (Or ETF), USO (Pétrole ETF)
-Stratégie : EMA 50/200 + RSI 14 + MACD 12/26/9
-Broker    : Alpaca (paper trading par défaut)
+TradingBot — Bot de trading actif sur matières premières
+Actifs    : GLD (Or), SLV (Argent), USO (Pétrole), UNG (Gaz naturel)
+Stratégie : EMA 20/50 + RSI 14 + MACD sur données horaires
+Broker    : Alpaca — supporte les fractions d'actions (fonctionne dès 10$)
 Démarrage : python trading_bot.py
 """
 
@@ -39,23 +39,31 @@ TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID: str = os.getenv("CHAT_ID", "")
 DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
 
-# ---- Actifs tradés ----
-ASSETS = ["GLD", "USO"]  # Or (GLD), Pétrole (USO)
+# ---- Actifs tradés (matières premières ETF) ----
+ASSETS = [
+    "GLD",  # Or
+    "SLV",  # Argent
+    "USO",  # Pétrole brut
+    "UNG",  # Gaz naturel
+]
 
-# ---- Paramètres des indicateurs ----
-EMA_SHORT = 50
-EMA_LONG = 200
+# ---- Paramètres des indicateurs (données horaires) ----
+EMA_SHORT = 20          # EMA 20 heures ≈ 3 jours de trading
+EMA_LONG = 50           # EMA 50 heures ≈ 7 jours de trading
 RSI_PERIOD = 14
-RSI_BUY_MAX = 50       # N'achète que si RSI < 50 (tendance non épuisée)
-RSI_SELL_MIN = 70      # Vend si RSI > 70 (suracheté)
+RSI_BUY_MAX = 45        # Achète si RSI < 45 (zone de survente relative)
+RSI_SELL_MIN = 65       # Vend si RSI > 65 (zone de surachat)
 MACD_FAST = 12
 MACD_SLOW = 26
 MACD_SIGNAL_PERIOD = 9
+DATA_INTERVAL = "1h"    # Données horaires → plus de signaux qu'en journalier
+DATA_PERIOD = "60d"     # 60 jours d'historique (limite yfinance pour 1h)
 
 # ---- Gestion du risque ----
-STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "0.03"))            # Stop-loss -3%
-MAX_POSITION_PCT = float(os.getenv("MAX_POSITION_PCT", "0.20"))      # Max 20% du portfolio
-DAILY_LOSS_LIMIT_PCT = float(os.getenv("DAILY_LOSS_LIMIT_PCT", "0.05"))  # -5% = stop journée
+STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "0.03"))
+MAX_POSITION_PCT = float(os.getenv("MAX_POSITION_PCT", "0.20"))
+DAILY_LOSS_LIMIT_PCT = float(os.getenv("DAILY_LOSS_LIMIT_PCT", "0.05"))
+MIN_ORDER_USD = 5.0     # Montant minimum par ordre (limite Alpaca)
 
 # ---- Fichiers de stockage ----
 TRADES_FILE = Path("trades.json")
@@ -69,7 +77,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("TradingBot")
 
-# Validation de la configuration au démarrage
 if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
     raise ValueError("ALPACA_API_KEY et ALPACA_SECRET_KEY requis dans le .env")
 if not TELEGRAM_BOT_TOKEN or not CHAT_ID:
@@ -105,7 +112,6 @@ def save_trade(trade: dict) -> None:
 
 
 def load_daily_pnl() -> dict:
-    """Charge le P&L du jour. Réinitialise automatiquement chaque matin."""
     data = load_json(DAILY_PNL_FILE, {})
     today = str(date.today())
     if data.get("date") != today:
@@ -122,29 +128,26 @@ def update_daily_pnl(pnl_delta: float) -> None:
 
 
 def send_telegram(text: str) -> None:
-    """Envoie une notification Telegram (synchrone)."""
     if not TELEGRAM_BOT_TOKEN or not CHAT_ID:
         return
     if len(text) > 4096:
         text = text[:4080] + "\n<i>[tronqué]</i>"
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     try:
         resp = requests.post(
-            url,
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
             json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"},
             timeout=10,
         )
         if not resp.ok:
             logger.warning("Telegram error : %s", resp.text[:200])
     except Exception as e:
-        logger.error("Erreur envoi Telegram : %s", e)
+        logger.error("Erreur Telegram : %s", e)
 
 
 # ============================================================
 # SECTION 3 — SERVICE ALPACA
 # ============================================================
 
-# Client Alpaca initialisé une seule fois
 trading_client = TradingClient(
     api_key=ALPACA_API_KEY,
     secret_key=ALPACA_SECRET_KEY,
@@ -153,7 +156,6 @@ trading_client = TradingClient(
 
 
 def get_account() -> dict:
-    """Retourne les infos du compte (valeur portfolio, liquidités, buying power)."""
     try:
         acc = trading_client.get_account()
         return {
@@ -167,7 +169,6 @@ def get_account() -> dict:
 
 
 def get_position(symbol: str) -> Optional[dict]:
-    """Retourne la position ouverte pour un symbole, None si aucune."""
     try:
         pos = trading_client.get_open_position(symbol)
         return {
@@ -177,9 +178,10 @@ def get_position(symbol: str) -> Optional[dict]:
             "current_price": float(pos.current_price),
             "unrealized_pl": float(pos.unrealized_pl),
             "unrealized_plpc": float(pos.unrealized_plpc),
+            "market_value": float(pos.market_value),
         }
     except Exception:
-        return None  # Pas de position ouverte = normal
+        return None
 
 
 def get_all_positions() -> list[dict]:
@@ -200,19 +202,25 @@ def get_all_positions() -> list[dict]:
         return []
 
 
-def place_order(symbol: str, side: str, qty: int) -> Optional[dict]:
-    """Soumet un ordre market BUY ou SELL."""
+def place_order_notional(symbol: str, side: str, amount_usd: float) -> Optional[dict]:
+    """
+    Ordre en dollars (notional) — permet les fractions d'actions.
+    Fonctionne avec n'importe quel montant >= MIN_ORDER_USD.
+    """
+    if amount_usd < MIN_ORDER_USD:
+        logger.warning("Montant trop faible pour %s : %.2f$ (min %.2f$)", symbol, amount_usd, MIN_ORDER_USD)
+        return None
     try:
         order = trading_client.submit_order(
             MarketOrderRequest(
                 symbol=symbol,
-                qty=qty,
+                notional=round(amount_usd, 2),
                 side=OrderSide.BUY if side == "BUY" else OrderSide.SELL,
                 time_in_force=TimeInForce.DAY,
             )
         )
-        logger.info("Ordre %s %s x%d soumis (id=%s)", side, symbol, qty, order.id)
-        return {"id": str(order.id), "symbol": symbol, "side": side, "qty": qty}
+        logger.info("Ordre %s %s %.2f$ soumis (id=%s)", side, symbol, amount_usd, order.id)
+        return {"id": str(order.id), "symbol": symbol, "side": side, "notional": amount_usd}
     except Exception as e:
         logger.error("Erreur ordre %s %s : %s", side, symbol, e)
         return None
@@ -237,13 +245,19 @@ def is_market_open() -> bool:
 
 
 # ============================================================
-# SECTION 4 — ANALYSE TECHNIQUE
+# SECTION 4 — ANALYSE TECHNIQUE (données horaires)
 # ============================================================
 
-def fetch_ohlcv(symbol: str, period: str = "1y") -> Optional[pd.DataFrame]:
-    """Télécharge les données journalières via yfinance."""
+def fetch_ohlcv(symbol: str) -> Optional[pd.DataFrame]:
+    """Données horaires sur 60 jours via yfinance."""
     try:
-        df = yf.download(symbol, period=period, interval="1d", progress=False, auto_adjust=True)
+        df = yf.download(
+            symbol,
+            period=DATA_PERIOD,
+            interval=DATA_INTERVAL,
+            progress=False,
+            auto_adjust=True,
+        )
         if df.empty or len(df) < EMA_LONG:
             logger.warning("%s : données insuffisantes (%d barres)", symbol, len(df))
             return None
@@ -266,31 +280,26 @@ def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
 
 
 def calc_macd(series: pd.Series) -> tuple[pd.Series, pd.Series]:
-    """Retourne (ligne MACD, ligne signal)."""
     macd_line = calc_ema(series, MACD_FAST) - calc_ema(series, MACD_SLOW)
     return macd_line, calc_ema(macd_line, MACD_SIGNAL_PERIOD)
 
 
 def get_signals(symbol: str) -> Optional[dict]:
-    """
-    Calcule EMA50, EMA200, RSI14 et MACD sur les données journalières.
-    Retourne un dict complet avec valeurs actuelles et booléens de signal.
-    """
+    """Calcule tous les indicateurs sur données horaires."""
     df = fetch_ohlcv(symbol)
     if df is None:
         return None
 
-    close = df["Close"].squeeze()  # Gère les DataFrames multi-niveaux de yfinance
+    close = df["Close"].squeeze()
 
-    ema50 = calc_ema(close, EMA_SHORT)
-    ema200 = calc_ema(close, EMA_LONG)
+    ema20 = calc_ema(close, EMA_SHORT)
+    ema50 = calc_ema(close, EMA_LONG)
     rsi = calc_rsi(close, RSI_PERIOD)
     macd_line, signal_line = calc_macd(close)
 
-    # Valeurs sur la dernière et avant-dernière bougie
     price = float(close.iloc[-1])
+    ema20_now = float(ema20.iloc[-1])
     ema50_now = float(ema50.iloc[-1])
-    ema200_now = float(ema200.iloc[-1])
     rsi_now = float(rsi.iloc[-1])
     macd_now = float(macd_line.iloc[-1])
     signal_now = float(signal_line.iloc[-1])
@@ -300,17 +309,15 @@ def get_signals(symbol: str) -> Optional[dict]:
     return {
         "symbol": symbol,
         "price": price,
+        "ema20": ema20_now,
         "ema50": ema50_now,
-        "ema200": ema200_now,
         "rsi": rsi_now,
         "macd": macd_now,
         "macd_signal": signal_now,
-        # Croisements MACD
         "macd_bullish_cross": (macd_prev < signal_prev) and (macd_now > signal_now),
         "macd_bearish_cross": (macd_prev > signal_prev) and (macd_now < signal_now),
-        # Tendance globale
-        "trend_bullish": ema50_now > ema200_now,
-        "trend_bearish": ema50_now < ema200_now,
+        "trend_bullish": ema20_now > ema50_now,
+        "trend_bearish": ema20_now < ema50_now,
     }
 
 
@@ -321,10 +328,10 @@ def get_signals(symbol: str) -> Optional[dict]:
 def should_buy(signals: dict, has_position: bool) -> bool:
     """
     Achat si :
-    - Pas déjà en position
-    - EMA50 > EMA200 (tendance haussière confirmée)
-    - RSI < 50 (pas encore suracheté, momentum disponible)
-    - MACD vient de croiser à la hausse (signal de déclenchement)
+    - Pas déjà en position sur cet actif
+    - EMA20 > EMA50 (tendance horaire haussière)
+    - RSI < 45 (pas encore suracheté)
+    - MACD vient de croiser à la hausse (déclencheur)
     """
     if has_position:
         return False
@@ -337,10 +344,10 @@ def should_buy(signals: dict, has_position: bool) -> bool:
 
 def should_sell(signals: dict, has_position: bool) -> bool:
     """
-    Vente si l'un des critères est rempli :
-    - RSI > 70 (suracheté)
-    - EMA50 < EMA200 (tendance inversée)
-    - MACD croisement baissier (perte de momentum)
+    Vente si :
+    - RSI > 65 (suracheté), ou
+    - EMA20 < EMA50 (retournement de tendance), ou
+    - MACD croisement baissier
     """
     if not has_position:
         return False
@@ -351,12 +358,9 @@ def should_sell(signals: dict, has_position: bool) -> bool:
     )
 
 
-def calculate_qty(price: float, buying_power: float) -> int:
-    """Taille de position : MAX_POSITION_PCT % du buying power disponible."""
-    if price <= 0 or buying_power <= 0:
-        return 1
-    qty = int((buying_power * MAX_POSITION_PCT) / price)
-    return max(qty, 1)
+def calculate_notional(buying_power: float) -> float:
+    """Montant en dollars à investir : MAX_POSITION_PCT % du buying power."""
+    return round(buying_power * MAX_POSITION_PCT, 2)
 
 
 # ============================================================
@@ -364,25 +368,18 @@ def calculate_qty(price: float, buying_power: float) -> int:
 # ============================================================
 
 def check_stop_loss(position: dict) -> bool:
-    """True si la perte latente dépasse STOP_LOSS_PCT."""
     return position["unrealized_plpc"] <= -STOP_LOSS_PCT
 
 
 def check_daily_loss_limit() -> bool:
-    """
-    True si le portfolio a perdu plus de DAILY_LOSS_LIMIT_PCT depuis l'ouverture.
-    Mémorise la valeur de départ au premier appel de la journée.
-    """
     account = get_account()
     if not account:
         return False
-
     daily = load_daily_pnl()
     if daily.get("start_value") is None:
         daily["start_value"] = account["portfolio_value"]
         save_json(DAILY_PNL_FILE, daily)
         return False
-
     loss_pct = (account["portfolio_value"] - daily["start_value"]) / daily["start_value"]
     if loss_pct <= -DAILY_LOSS_LIMIT_PCT:
         logger.warning("Limite journalière atteinte : %.2f%%", loss_pct * 100)
@@ -396,25 +393,24 @@ def check_daily_loss_limit() -> bool:
 
 def run_strategy() -> None:
     """
-    Exécutée toutes les 15 minutes (9h30–16h00 heure NY, lun–ven).
-    Pour chaque actif : vérifie stop-loss → signal vente → signal achat.
+    Exécutée toutes les 30 minutes (9h30–16h NY, lun–ven).
+    Données horaires → signaux plus fréquents que le bot journalier.
     """
-    logger.info("=== Analyse des signaux ===")
+    logger.info("=== Analyse des signaux (horaire) ===")
 
     if not is_market_open():
-        logger.info("Marché fermé — analyse ignorée")
+        logger.info("Marché fermé")
         return
 
     if check_daily_loss_limit():
         send_telegram(
-            "⛔ <b>Limite de perte journalière atteinte</b>\n"
-            f"Trading suspendu pour aujourd'hui (seuil : -{DAILY_LOSS_LIMIT_PCT*100:.0f}%)"
+            f"⛔ <b>Limite journalière atteinte</b> (-{DAILY_LOSS_LIMIT_PCT*100:.0f}%)\n"
+            "Trading suspendu jusqu'à demain."
         )
         return
 
     account = get_account()
     if not account:
-        logger.error("Impossible de récupérer le compte Alpaca")
         return
 
     buying_power = account["buying_power"]
@@ -426,22 +422,21 @@ def run_strategy() -> None:
 
         signals = get_signals(symbol)
         if signals is None:
-            logger.warning("Signaux indisponibles pour %s", symbol)
             continue
 
         position = get_position(symbol)
         has_position = position is not None
 
-        # --- Stop-loss prioritaire ---
+        # --- Stop-loss ---
         if has_position and check_stop_loss(position):
-            logger.warning("%s stop-loss : %.2f%%", symbol, position["unrealized_plpc"] * 100)
+            logger.warning("%s stop-loss déclenché (%.2f%%)", symbol, position["unrealized_plpc"] * 100)
             if close_position(symbol):
                 pl = position["unrealized_pl"]
                 update_daily_pnl(pl)
                 send_telegram(
                     f"🛑 <b>STOP-LOSS {symbol}</b> [{mode}]\n"
                     f"Perte : <b>{pl:+.2f} $</b> ({position['unrealized_plpc']*100:+.1f}%)\n"
-                    f"Prix de sortie : {signals['price']:.2f} $"
+                    f"Prix : {signals['price']:.2f} $"
                 )
                 save_trade({
                     "symbol": symbol, "side": "SELL_STOPLOSS",
@@ -459,7 +454,7 @@ def run_strategy() -> None:
                 if signals["rsi"] > RSI_SELL_MIN:
                     reasons.append(f"RSI={signals['rsi']:.1f}")
                 if signals["trend_bearish"]:
-                    reasons.append("EMA50 < EMA200")
+                    reasons.append("EMA20 < EMA50")
                 if signals["macd_bearish_cross"]:
                     reasons.append("MACD ↘")
                 send_telegram(
@@ -478,47 +473,46 @@ def run_strategy() -> None:
 
         # --- Signal d'achat ---
         elif not has_position and should_buy(signals, has_position):
-            qty = calculate_qty(signals["price"], buying_power)
-            if place_order(symbol, "BUY", qty):
-                cost = qty * signals["price"]
+            notional = calculate_notional(buying_power)
+            if place_order_notional(symbol, "BUY", notional):
                 send_telegram(
                     f"📥 <b>ACHAT {symbol}</b> [{mode}]\n"
-                    f"Quantité : <b>{qty}</b> × {signals['price']:.2f} $ = <b>{cost:.2f} $</b>\n"
-                    f"RSI : {signals['rsi']:.1f} | EMA50 > EMA200 ✅ | MACD ↗ ✅\n"
+                    f"Montant investi : <b>{notional:.2f} $</b>\n"
+                    f"Prix unitaire : {signals['price']:.2f} $ "
+                    f"(≈ {notional/signals['price']:.4f} actions)\n"
+                    f"RSI : {signals['rsi']:.1f} | EMA20 > EMA50 ✅ | MACD ↗ ✅\n"
                     f"Portfolio : {portfolio_value:.2f} $"
                 )
                 save_trade({
                     "symbol": symbol, "side": "BUY",
-                    "price": signals["price"], "qty": qty, "cost": cost,
+                    "price": signals["price"], "notional": notional,
                     "timestamp": datetime.now().isoformat(),
                 })
-                logger.info("ACHAT %s — qty=%d prix=%.2f$", symbol, qty, signals["price"])
+                logger.info("ACHAT %s — %.2f$", symbol, notional)
 
         else:
-            status = "position ouverte" if has_position else "pas de signal"
             logger.info(
                 "%s : %s | RSI=%.1f | EMA_bull=%s | MACD_cross=%s",
-                symbol, status, signals["rsi"],
-                signals["trend_bullish"], signals["macd_bullish_cross"],
+                symbol,
+                "position ouverte" if has_position else "pas de signal",
+                signals["rsi"], signals["trend_bullish"], signals["macd_bullish_cross"],
             )
 
 
 def daily_summary() -> None:
-    """Résumé envoyé chaque soir à 16h05 (après clôture NY)."""
+    """Résumé quotidien envoyé à 16h05 (clôture Wall Street)."""
     account = get_account()
     positions = get_all_positions()
     daily = load_daily_pnl()
     mode = "🧪 PAPER" if ALPACA_PAPER else "💰 RÉEL"
-
     pnl = daily.get("pnl", 0.0)
-    pnl_emoji = "📈" if pnl >= 0 else "📉"
 
     lines = [
-        f"📊 <b>Résumé du {datetime.now().strftime('%d/%m/%Y')}</b> [{mode}]",
+        f"📊 <b>Résumé {datetime.now().strftime('%d/%m/%Y')}</b> [{mode}]",
         "",
         f"💼 Portfolio : <b>{account.get('portfolio_value', 0):.2f} $</b>",
         f"💵 Liquidités : {account.get('cash', 0):.2f} $",
-        f"{pnl_emoji} P&L du jour : <b>{pnl:+.2f} $</b>",
+        f"{'📈' if pnl >= 0 else '📉'} P&L du jour : <b>{pnl:+.2f} $</b>",
         f"Trades exécutés : {daily.get('trades', 0)}",
         "",
     ]
@@ -528,15 +522,14 @@ def daily_summary() -> None:
         for p in positions:
             arrow = "📈" if p["unrealized_pl"] >= 0 else "📉"
             lines.append(
-                f"{arrow} <b>{p['symbol']}</b> : {p['qty']} actions | "
-                f"Entrée : {p['avg_entry_price']:.2f} $ | "
+                f"{arrow} <b>{p['symbol']}</b> | "
+                f"Entrée : {p['avg_entry_price']:.2f} $ → {p['current_price']:.2f} $ | "
                 f"P&L : {p['unrealized_pl']:+.2f} $ ({p['unrealized_plpc']*100:+.1f}%)"
             )
     else:
         lines.append("Aucune position ouverte ce soir")
 
     send_telegram("\n".join(lines))
-    logger.info("Résumé journalier envoyé")
 
 
 # ============================================================
@@ -544,43 +537,40 @@ def daily_summary() -> None:
 # ============================================================
 
 def main() -> None:
-    logger.info("Démarrage TradingBot — mode %s", "PAPER" if ALPACA_PAPER else "RÉEL")
-    logger.info("Actifs : %s | Stop-loss : %.0f%% | Position max : %.0f%%",
-                ASSETS, STOP_LOSS_PCT * 100, MAX_POSITION_PCT * 100)
+    logger.info("Démarrage TradingBot — %s", "PAPER" if ALPACA_PAPER else "RÉEL")
 
-    # Initialise les fichiers de stockage
     if not TRADES_FILE.exists():
         save_json(TRADES_FILE, [])
     load_daily_pnl()
 
-    # Message de démarrage Telegram
     account = get_account()
     mode = "🧪 PAPER TRADING" if ALPACA_PAPER else "💰 TRADING RÉEL"
+
     send_telegram(
         f"🤖 <b>TradingBot démarré</b> — {mode}\n\n"
         f"Actifs : <b>{', '.join(ASSETS)}</b>\n"
+        f"Données : horaires (1h) — signaux plus fréquents\n"
         f"Stratégie : EMA {EMA_SHORT}/{EMA_LONG} + RSI {RSI_PERIOD} + MACD\n"
         f"Stop-loss : {STOP_LOSS_PCT*100:.0f}% | "
-        f"Position max : {MAX_POSITION_PCT*100:.0f}% du portfolio\n"
-        f"Limite journalière : -{DAILY_LOSS_LIMIT_PCT*100:.0f}%\n\n"
-        f"💼 Portfolio initial : <b>{account.get('portfolio_value', 0):.2f} $</b>"
+        f"Position max : {MAX_POSITION_PCT*100:.0f}%\n"
+        f"Fractions d'actions : ✅ (fonctionne dès {MIN_ORDER_USD:.0f}$)\n\n"
+        f"💼 Portfolio : <b>{account.get('portfolio_value', 0):.2f} $</b>"
     )
 
-    # Planificateur — fonctionne sur l'heure de New York
     scheduler = BlockingScheduler(timezone="America/New_York")
 
-    # Analyse toutes les 15 min, 9h30–15h59, lundi–vendredi
+    # Analyse toutes les 30 min, 9h30–16h, lundi–vendredi
     scheduler.add_job(
         run_strategy,
         "cron",
         day_of_week="mon-fri",
         hour="9-15",
-        minute="*/15",
+        minute="*/30",
         id="run_strategy",
-        name="Analyse signaux",
+        name="Analyse signaux horaires",
     )
 
-    # Résumé quotidien à 16h05 (après clôture Wall Street)
+    # Résumé à 16h05 chaque soir de semaine
     scheduler.add_job(
         daily_summary,
         "cron",
@@ -591,7 +581,7 @@ def main() -> None:
         name="Résumé journalier",
     )
 
-    logger.info("Scheduler actif — analyse toutes les 15 min (9h30-16h NY, lun-ven)")
+    logger.info("Scheduler actif — analyse toutes les 30 min (9h30-16h NY)")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
