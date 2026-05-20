@@ -7,7 +7,8 @@ on:
     paths:
       - '.github/workflows/trading_bot.yml'
   schedule:
-    - cron: '5,25,45 13-21 * * 1-5'
+    # Toutes les 5 min, 13h05-21h05 UTC = 9h05-17h05 ET (couvre NYSE 9h30-16h)
+    - cron: '*/5 13-21 * * 1-5'
   workflow_dispatch:
 
 permissions:
