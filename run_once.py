@@ -12,6 +12,7 @@ from trading_bot import (
     DISABLED_ASSETS_FILE,
     POSITIONS_META_FILE,
     RISK_STATS_FILE,
+    BOT_CONTROL_FILE,
     load_daily_pnl,
     save_json,
     run_strategy,
@@ -34,7 +35,18 @@ if __name__ == "__main__":
         (TRADES_FILE, []),
         (DISABLED_ASSETS_FILE, []),
         (POSITIONS_META_FILE, {}),
-        (RISK_STATS_FILE, {"win_streak": 0, "last_date": None}),
+        (RISK_STATS_FILE, {
+            "win_streak": 0, "last_date": None,
+            "current_week_pnl": 0.0, "weekly_results": [],
+            "profitable_weeks": 0, "peak_portfolio_value": None,
+            "live_start_date": None,
+        }),
+        (BOT_CONTROL_FILE, {
+            "paused": False, "paused_at": None,
+            "first_live_order_done": False,
+            "calibration_live_start": None,
+            "last_telegram_update_id": 0,
+        }),
     ]:
         if not path.exists():
             save_json(path, default)

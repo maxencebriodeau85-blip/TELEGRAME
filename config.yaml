@@ -1,0 +1,14 @@
+trading:
+  # Passer à LIVE quand tous les points de la checklist sont validés
+  # Changer aussi T212_DEMO à 'false' dans .github/workflows/trading_bot.yml
+  mode: DEMO                 # DEMO | LIVE
+  live_capital_limit: 500    # montant max total engageable en € (mode LIVE uniquement)
+  calibration_days: 30       # premiers N jours live = sizing 50%
+
+risk:
+  # Circuit breaker journalier progressif (mode LIVE uniquement)
+  # En DEMO : DAILY_LOSS_LIMIT_PCT de la variable d'environnement (5%)
+  phase1_cb_pct: 0.03              # semaines 1-2 : -3% max/jour
+  normal_cb_pct: 0.05              # après validation : -5% max/jour
+  profitable_weeks_to_relax: 3     # semaines consécutives rentables pour passer à -5%
+  cumulative_drawdown_limit: 0.15  # drawdown cumulé > -15% → arrêt complet + alerte urgente

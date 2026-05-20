@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import time
+import yaml
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -149,6 +150,16 @@ DAILY_PNL_FILE       = Path("daily_pnl.json")
 DISABLED_ASSETS_FILE = Path("disabled_assets.json")
 POSITIONS_META_FILE  = Path("positions_meta.json")   # trailing stop tracking
 RISK_STATS_FILE      = Path("risk_stats.json")        # win streak & historical risk
+BOT_CONTROL_FILE     = Path("bot_control.json")       # pause/resume + first live order
+DECISIONS_LOG_FILE   = Path("decisions.log")          # audit trail des décisions
+CONFIG_FILE          = Path("config.yaml")            # paramètres mode live
+
+# Circuit breaker progressif (LIVE uniquement — DEMO utilise DAILY_LOSS_LIMIT_PCT)
+CB_PHASE1_PCT             = 0.03   # semaines 1-2 live : -3% par jour
+CB_NORMAL_PCT             = 0.05   # après 3 semaines profitables : -5% par jour
+PROFITABLE_WEEKS_TO_RELAX = 3      # semaines consécutives rentables pour assouplir
+CUMULATIVE_DRAWDOWN_LIMIT = 0.15   # drawdown cumulé > -15% → arrêt complet
+LIVE_PHASE1_DAYS          = 14     # durée de la phase stricte (jours calendaires)
 
 # ---- Logging ----
 logging.basicConfig(
@@ -262,15 +273,37 @@ def load_risk_stats() -> dict:
 def record_day_result(pnl: float) -> int:
     """
     Appelé en fin de journée (daily_summary) avec le P&L du jour.
-    Met à jour le streak et retourne sa valeur courante.
+    Met à jour le streak journalier et le suivi hebdomadaire (pour le CB progressif).
     """
-    stats = load_risk_stats()
-    today = str(datetime.now(ZoneInfo("America/New_York")).date())
+    stats      = load_risk_stats()
+    now_ny     = datetime.now(ZoneInfo("America/New_York"))
+    today      = str(now_ny.date())
+
     if stats.get("last_date") != today:
-        stats["win_streak"] = stats.get("win_streak", 0) + 1 if pnl >= 0 else 0
-        stats["last_date"]  = today
+        stats["win_streak"]       = stats.get("win_streak", 0) + 1 if pnl >= 0 else 0
+        stats["last_date"]        = today
+        stats["current_week_pnl"] = stats.get("current_week_pnl", 0.0) + pnl
+
+        # Vendredi = clôture de semaine
+        if now_ny.weekday() == 4:
+            history  = stats.get("weekly_results", [])
+            week_pnl = stats["current_week_pnl"]
+            history.append({"date": today, "pnl": round(week_pnl, 2)})
+            stats["weekly_results"]   = history[-12:]  # 12 semaines d'historique
+            stats["current_week_pnl"] = 0.0
+
+            # Semaines consécutives rentables (pour assouplir le CB)
+            streak_w = 0
+            for w in reversed(stats["weekly_results"]):
+                if w["pnl"] >= 0:
+                    streak_w += 1
+                else:
+                    break
+            stats["profitable_weeks"] = streak_w
+
         save_json(RISK_STATS_FILE, stats)
-    return stats["win_streak"]
+
+    return stats.get("win_streak", 0)
 
 
 # ---- Divers ----
@@ -312,6 +345,159 @@ def send_telegram(text: str) -> None:
             logger.warning("Telegram tentative %d/3 : %s", attempt + 1, resp.text[:100])
         except Exception as e:
             logger.error("Telegram tentative %d/3 : %s", attempt + 1, e)
+
+
+# ============================================================
+# SECTION 2.5 — CONFIG, CONTRÔLE & AUDIT
+# ============================================================
+
+_config_cache: dict = {}
+
+
+def load_config() -> dict:
+    """Charge config.yaml une seule fois par run (cache module-level)."""
+    global _config_cache
+    if _config_cache:
+        return _config_cache
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                _config_cache = yaml.safe_load(f) or {}
+        except Exception as e:
+            logger.warning("load_config : %s", e)
+    return _config_cache
+
+
+def load_bot_control() -> dict:
+    return load_json(BOT_CONTROL_FILE, {
+        "paused": False,
+        "paused_at": None,
+        "first_live_order_done": False,
+        "calibration_live_start": None,
+        "last_telegram_update_id": 0,
+    })
+
+
+def save_bot_control(ctrl: dict) -> None:
+    save_json(BOT_CONTROL_FILE, ctrl)
+
+
+def log_decision(symbol: str, action: str, reason: str, signals: Optional[dict] = None) -> None:
+    """Écrit chaque décision de trading dans decisions.log pour audit post-trade."""
+    now = datetime.now(ZoneInfo("America/New_York")).isoformat()
+    sig_str = ""
+    if signals:
+        sig_str = (
+            f" | RSI={signals.get('rsi', 0):.1f}"
+            f" EMA={'↗' if signals.get('trend_bullish') else '↘'}"
+            f" MACD={'↗' if signals.get('macd_bull_cross') else ('↘' if signals.get('macd_bear_cross') else '-')}"
+            f" score={signals.get('confluence_score', 0)}/5"
+            f" daily={signals.get('daily_trend', '?')}"
+        )
+    line = f"{now} | {symbol:<6} | {action:<24} | {reason}{sig_str}\n"
+    try:
+        with open(DECISIONS_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception as e:
+        logger.warning("log_decision : %s", e)
+
+
+def poll_telegram_commands() -> None:
+    """
+    Appelé au début de chaque run GitHub Actions.
+    Récupère les commandes /pause et /resume via getUpdates (offset pour éviter les doublons).
+    Seul le CHAT_ID autorisé est traité — les autres messages sont ignorés silencieusement.
+    """
+    ctrl = load_bot_control()
+    offset = ctrl.get("last_telegram_update_id", 0)
+    try:
+        resp = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates",
+            params={"offset": offset + 1, "timeout": 3, "limit": 20},
+            timeout=8,
+        )
+        if not resp.ok:
+            return
+        changed = False
+        for update in resp.json().get("result", []):
+            update_id = update.get("update_id", 0)
+            msg       = update.get("message", {})
+            chat_id   = str(msg.get("chat", {}).get("id", ""))
+            text      = msg.get("text", "").strip()
+
+            ctrl["last_telegram_update_id"] = max(ctrl.get("last_telegram_update_id", 0), update_id)
+            changed = True
+
+            if chat_id != str(CHAT_ID):
+                continue
+
+            cmd = text.split()[0].lower() if text else ""
+            if cmd == "/pause":
+                ctrl["paused"] = True
+                ctrl["paused_at"] = datetime.now().isoformat()
+                send_telegram(
+                    "⏸️ <b>Bot en pause</b>\n"
+                    "Stratégie suspendue — positions existantes conservées.\n"
+                    "Envoyez <code>/resume</code> pour reprendre."
+                )
+                logger.info("Bot mis en pause via Telegram")
+            elif cmd == "/resume":
+                ctrl["paused"] = False
+                ctrl["paused_at"] = None
+                send_telegram("▶️ <b>Bot repris</b> — prochaine analyse dans ≤ 20 min.")
+                logger.info("Bot repris via Telegram")
+
+        if changed:
+            save_bot_control(ctrl)
+    except Exception as e:
+        logger.warning("poll_telegram_commands : %s", e)
+
+
+def _calibration_factor() -> float:
+    """
+    Retourne 0.5 pendant les CALIBRATION_DAYS premiers jours en mode LIVE.
+    Permet une phase de calibration prudente au démarrage du live.
+    En DEMO : toujours 1.0.
+    """
+    if T212_DEMO:
+        return 1.0
+    ctrl = load_bot_control()
+    cal_start = ctrl.get("calibration_live_start")
+    if not cal_start:
+        return 0.5  # premier ordre live pas encore passé → sizing minimal par précaution
+    try:
+        start    = datetime.fromisoformat(cal_start).date()
+        cal_days = load_config().get("trading", {}).get("calibration_days", 30)
+        days     = (datetime.now(ZoneInfo("America/New_York")).date() - start).days
+        return 0.5 if days < cal_days else 1.0
+    except Exception:
+        return 0.5
+
+
+def _get_circuit_breaker_pct() -> float:
+    """
+    Seuil de circuit breaker journalier selon la phase live :
+    - Phase 1 (LIVE_PHASE1_DAYS premiers jours) : CB_PHASE1_PCT (-3%)
+    - Après PROFITABLE_WEEKS_TO_RELAX semaines consécutives rentables : CB_NORMAL_PCT (-5%)
+    - Sinon : CB_PHASE1_PCT (-3%) par défaut
+    """
+    stats      = load_risk_stats()
+    live_start = stats.get("live_start_date")
+    if not live_start:
+        return CB_PHASE1_PCT
+
+    try:
+        start     = datetime.fromisoformat(live_start).date()
+        days_live = (datetime.now(ZoneInfo("America/New_York")).date() - start).days
+    except Exception:
+        return CB_PHASE1_PCT
+
+    if days_live < LIVE_PHASE1_DAYS:
+        return CB_PHASE1_PCT
+
+    cfg_weeks        = load_config().get("risk", {}).get("profitable_weeks_to_relax", PROFITABLE_WEEKS_TO_RELAX)
+    profitable_weeks = stats.get("profitable_weeks", 0)
+    return CB_NORMAL_PCT if profitable_weeks >= cfg_weeks else CB_PHASE1_PCT
 
 
 # ============================================================
@@ -658,16 +844,18 @@ def calculate_amount_atr(
     """
     sizing = SIZING_PARAMS[ASSETS[symbol]["params"]]
 
+    cal = _calibration_factor()  # 0.5 pendant phase calibration live, 1.0 sinon
+
     if atr <= 0 or current_price <= 0:
-        return round(min(buying_power * ASSETS[symbol]["pct"], buying_power), 2)
+        return round(min(buying_power * ASSETS[symbol]["pct"] * cal, buying_power), 2)
 
     risk_amount    = portfolio_value * sizing["risk_pct"]
     stop_distance  = atr * sizing["atr_mult"]
     shares         = risk_amount / stop_distance
-    position_value = shares * current_price
+    position_value = shares * current_price * cal
 
     cap = min(
-        portfolio_value * sizing["max_pct"],
+        portfolio_value * sizing["max_pct"] * cal,
         buying_power,
     )
     return round(min(position_value, cap), 2)
@@ -894,24 +1082,63 @@ def check_daily_loss_limit() -> bool:
     account = get_account()
     if not account:
         return False
+
+    portfolio_value = account["portfolio_value"]
+
+    # ── Drawdown cumulé (LIVE uniquement) ────────────────────────────────
+    if not T212_DEMO:
+        stats = load_risk_stats()
+        peak  = stats.get("peak_portfolio_value")
+        if peak is None or portfolio_value > peak:
+            stats["peak_portfolio_value"] = portfolio_value
+            save_json(RISK_STATS_FILE, stats)
+            peak = portfolio_value
+
+        if peak > 0:
+            cum_dd    = (portfolio_value - peak) / peak
+            cfg_limit = load_config().get("risk", {}).get(
+                "cumulative_drawdown_limit", CUMULATIVE_DRAWDOWN_LIMIT
+            )
+            if cum_dd <= -cfg_limit:
+                _close_all_positions()
+                ctrl           = load_bot_control()
+                ctrl["paused"] = True
+                ctrl["paused_at"] = datetime.now().isoformat()
+                save_bot_control(ctrl)
+                send_telegram(
+                    f"🚨 <b>ARRÊT D'URGENCE — Drawdown cumulé</b>\n"
+                    f"Pic : {peak:.2f} € → Actuel : {portfolio_value:.2f} €\n"
+                    f"Drawdown : <b>{cum_dd*100:+.1f}%</b> (seuil -{cfg_limit*100:.0f}%)\n"
+                    "Toutes positions clôturées. Bot suspendu.\n"
+                    "⚠️ Intervention manuelle requise — envoyez /resume pour relancer."
+                )
+                logger.critical("ARRÊT D'URGENCE — drawdown cumulé %.1f%%", cum_dd * 100)
+                return True
+
+    # ── Circuit breaker journalier ────────────────────────────────────────
     daily = load_daily_pnl()
     if daily.get("start_value") is None:
-        daily["start_value"] = account["portfolio_value"]
+        daily["start_value"] = portfolio_value
         save_json(DAILY_PNL_FILE, daily)
         return False
-    start = daily["start_value"]
+
+    start = daily.get("start_value", 0)
     if start == 0:
         return False
-    loss_pct = (account["portfolio_value"] - start) / start
-    if loss_pct <= -DAILY_LOSS_LIMIT_PCT:
-        logger.warning("Circuit breaker : %.2f%%", loss_pct * 100)
+
+    loss_pct = (portfolio_value - start) / start
+    cb_pct   = DAILY_LOSS_LIMIT_PCT if T212_DEMO else _get_circuit_breaker_pct()
+
+    if loss_pct <= -cb_pct:
+        logger.warning("Circuit breaker : %.2f%% (seuil %.0f%%)", loss_pct * 100, cb_pct * 100)
         _close_all_positions()
         send_telegram(
             f"⛔ <b>Circuit breaker</b> ({loss_pct*100:+.1f}%)\n"
-            f"Seuil : -{DAILY_LOSS_LIMIT_PCT*100:.0f}% | Toutes positions clôturées.\n"
+            f"Seuil : -{cb_pct*100:.0f}% | Toutes positions clôturées.\n"
             "Trading suspendu jusqu'à demain."
         )
         return True
+
     return False
 
 
@@ -929,6 +1156,9 @@ def _execute_trailing_stop(
         pl = position["unrealized_pl"]
         update_daily_pnl(pl)
         clear_position_meta(symbol)
+        log_decision(symbol, "TRAILING_STOP",
+            f"PL={pl:+.2f}€ ({position['unrealized_plpc']*100:+.1f}%) "
+            f"max={max_price:.4f} stop={stop_price:.4f}")
         send_telegram(
             f"📉 <b>TRAILING STOP {symbol}</b> [{mode}] {asset_cfg['category']}\n"
             f"P&L : <b>{pl:+.2f} €</b> ({position['unrealized_plpc']*100:+.1f}%)\n"
@@ -954,6 +1184,8 @@ def _execute_stop_loss(symbol: str, signals: dict, position: dict, mode: str) ->
         pl = position["unrealized_pl"]
         update_daily_pnl(pl)
         clear_position_meta(symbol)
+        log_decision(symbol, "STOP_LOSS",
+            f"PL={pl:+.2f}€ ({position['unrealized_plpc']*100:+.1f}%) seuil=-{stop_pct*100:.0f}%")
         send_telegram(
             f"🛑 <b>STOP-LOSS {symbol}</b> [{mode}] {asset_cfg['category']}\n"
             f"Perte : <b>{pl:+.2f} €</b> ({position['unrealized_plpc']*100:+.1f}%)\n"
@@ -973,6 +1205,8 @@ def _execute_sell(symbol: str, signals: dict, position: dict, mode: str) -> None
         pl = position["unrealized_pl"]
         update_daily_pnl(pl)
         clear_position_meta(symbol)
+        log_decision(symbol, "VENTE_SIGNAL",
+            f"PL={pl:+.2f}€ ({position['unrealized_plpc']*100:+.1f}%)", signals)
         reasons = []
         if signals["rsi"] > signals["rsi_sell"]:
             reasons.append(f"RSI={signals['rsi']:.1f}")
@@ -1003,9 +1237,24 @@ def _execute_buy(
 ) -> None:
     asset_cfg = ASSETS[symbol]
     stop_pct  = asset_cfg["stop"]
-    amount    = calculate_amount_atr(
+
+    # ── Garde capital live (mode LIVE uniquement) ──────────────────────────
+    if not T212_DEMO:
+        cfg        = load_config()
+        live_limit = cfg.get("trading", {}).get("live_capital_limit", 500)
+        account_now = get_account()
+        if account_now:
+            invested = account_now.get("invested", 0)
+            if invested >= live_limit:
+                log_decision(symbol, "ACHAT_REJETÉ_LIMITE",
+                    f"capital live {live_limit:.0f}€ atteint (investi={invested:.2f}€)", signals)
+                logger.info("%s : achat bloqué — limite capital live %.0f€", symbol, live_limit)
+                return
+
+    amount = calculate_amount_atr(
         symbol, buying_power, portfolio_value, signals["atr"], signals["price"]
     )
+    cal = _calibration_factor()
     if place_buy_order(symbol, amount, signals["price"]):
         qty_approx  = amount / signals["price"]
         daily_emoji = {"bullish": "🌞", "bearish": "🌧️", "unknown": "❓"}.get(
@@ -1024,6 +1273,28 @@ def _execute_buy(
             f"Confluence : <b>{signals['confluence_score']}/5</b> | "
             f"Stop : -{stop_pct*100:.0f}% | Trailing dès +{TRAILING_ACTIVATION_PCT*100:.0f}%"
         )
+        # ── Alerte premier ordre réel ──────────────────────────────────────
+        if not T212_DEMO:
+            ctrl = load_bot_control()
+            if not ctrl.get("first_live_order_done"):
+                send_telegram(
+                    f"⚠️ <b>PREMIER ORDRE RÉEL</b>\n"
+                    f"{symbol} ACHAT <b>{amount:.2f} €</b>\n"
+                    "Vérifiez manuellement sur Trading 212 avant de continuer."
+                )
+                ctrl["first_live_order_done"]   = True
+                ctrl["calibration_live_start"]  = ctrl.get("calibration_live_start") \
+                                                  or datetime.now().isoformat()
+                save_bot_control(ctrl)
+            # Marquer la date de démarrage live dans risk_stats pour le CB progressif
+            stats = load_risk_stats()
+            if not stats.get("live_start_date"):
+                stats["live_start_date"] = datetime.now().isoformat()
+                save_json(RISK_STATS_FILE, stats)
+
+        cal_note = f" [calibration 50%]" if cal < 1.0 else ""
+        log_decision(symbol, "ACHAT_ORDRE",
+            f"{amount:.2f}€ prix={signals['price']:.4f}${cal_note}", signals)
         init_position_meta(symbol, signals["price"])
         save_trade({
             "symbol": symbol, "side": "BUY",
@@ -1032,10 +1303,11 @@ def _execute_buy(
             "atr": signals["atr"],
             "confluence_score": signals["confluence_score"],
             "daily_trend": signals["daily_trend"],
+            "calibration_factor": cal,
             "timestamp": datetime.now().isoformat(),
         })
-        logger.info("ACHAT %s — %.2f€ | ATR=%.4f | confluence=%d/5",
-                    symbol, amount, signals["atr"], signals["confluence_score"])
+        logger.info("ACHAT %s — %.2f€ | ATR=%.4f | confluence=%d/5 | cal=%.0f%%",
+                    symbol, amount, signals["atr"], signals["confluence_score"], cal * 100)
 
 
 def _handle_asset(
@@ -1085,12 +1357,15 @@ def _handle_asset(
         # 4. Achat
         if should_buy(signals, has_position):
             if open_count >= MAX_OPEN_POSITIONS:
+                log_decision(symbol, "ACHAT_REJETÉ_MAX_POS",
+                    f"MAX_OPEN_POSITIONS={MAX_OPEN_POSITIONS} atteint", signals)
                 logger.info("%s : achat ignoré [score=%d/5] — limite %d positions",
                             symbol, signals["confluence_score"], MAX_OPEN_POSITIONS)
                 return 0
 
             allowed, reason = check_correlation_allowed(symbol, positions_map)
             if not allowed:
+                log_decision(symbol, "ACHAT_REJETÉ_CORR", reason, signals)
                 logger.info("%s : achat bloqué — %s", symbol, reason)
                 return 0
 
@@ -1114,6 +1389,14 @@ def _handle_asset(
 def run_strategy() -> None:
     """Appelé toutes les 20 min par GitHub Actions."""
     logger.info("=== Analyse (%d actifs) ===", len(ASSETS))
+
+    # Traite les commandes /pause /resume reçues depuis le dernier run
+    poll_telegram_commands()
+
+    ctrl = load_bot_control()
+    if ctrl.get("paused"):
+        logger.info("Bot en pause (envoyez /resume via Telegram pour reprendre)")
+        return
 
     if not is_market_open():
         logger.info("Marché fermé")
