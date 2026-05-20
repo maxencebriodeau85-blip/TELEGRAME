@@ -1,0 +1,50 @@
+name: TradingBot — Trading 212
+
+on:
+  schedule:
+    # Toutes les 20 min, 13h05-21h05 UTC = 9h05-17h05 ET (couvre NYSE 9h30-16h)
+    - cron: '5,25,45 13-21 * * 1-5'
+  workflow_dispatch: # Lancement manuel depuis GitHub possible
+
+permissions:
+  contents: write
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupération du code et de l'état
+        uses: actions/checkout@v4
+        with:
+          ref: claude/telegram-investbot-zJXWJ
+
+      - name: Installation Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Installation des dépendances
+        run: pip install -r requirements.txt
+
+      - name: Exécution de la stratégie
+        env:
+          T212_API_KEY: ${{ secrets.T212_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          T212_DEMO: 'true'
+          STOP_LOSS_PCT: '0.03'
+          MAX_POSITION_PCT: '0.20'
+          DAILY_LOSS_LIMIT_PCT: '0.05'
+          DEBUG: 'false'
+        run: python run_once.py
+
+      - name: Sauvegarde de l'état (trades, PnL)
+        run: |
+          git config user.email "trading-bot@users.noreply.github.com"
+          git config user.name "InvestBot"
+          git pull --rebase origin claude/telegram-investbot-zJXWJ
+          git add trades.json daily_pnl.json disabled_assets.json 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "bot: mise à jour état [skip ci]"
+          git push origin claude/telegram-investbot-zJXWJ
