@@ -10,6 +10,8 @@ from pathlib import Path
 from trading_bot import (
     TRADES_FILE,
     DISABLED_ASSETS_FILE,
+    POSITIONS_META_FILE,
+    RISK_STATS_FILE,
     load_daily_pnl,
     save_json,
     run_strategy,
@@ -28,7 +30,12 @@ logger = logging.getLogger("RunOnce")
 
 if __name__ == "__main__":
     # Initialise les fichiers de stockage si absents
-    for path, default in [(TRADES_FILE, []), (DISABLED_ASSETS_FILE, [])]:
+    for path, default in [
+        (TRADES_FILE, []),
+        (DISABLED_ASSETS_FILE, []),
+        (POSITIONS_META_FILE, {}),
+        (RISK_STATS_FILE, {"win_streak": 0, "last_date": None}),
+    ]:
         if not path.exists():
             save_json(path, default)
     load_daily_pnl()

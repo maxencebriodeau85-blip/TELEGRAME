@@ -5,7 +5,7 @@ TradingBot COMPLET — Trading 212 Invest
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Actifs    : Matières premières + Forex ETF + Crypto ETF (10 actifs)
 Stratégie : EMA 20/50 + RSI 14 + MACD adapté par catégorie, bougies 15min CLÔTURÉES
-Risque    : Stop-loss par catégorie, circuit breaker -5%/jour, max 3 positions simultanées
+Risque    : ATR sizing, trailing stop, circuit breaker -5%/jour, corrélations inter-actifs
 Broker    : Trading 212 Invest (fractions, 0 commission)
 """
 
@@ -42,92 +42,113 @@ DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
 T212_BASE = "https://demo.trading212.com" if T212_DEMO else "https://live.trading212.com"
 
 # ============================================================
-# PARAMÈTRES DE SIGNAL PAR CATÉGORIE D'ACTIF
+# PARAMÈTRES DE SIGNAL PAR CATÉGORIE
 # ============================================================
 #
-# Matières premières (GLD/SLV/USO/UNG) : MACD standard 12/26/9, RSI seuil moyen
-# Forex ETF (FXE/UUP/FXB/FXY) : MACD lent 24/52/18 (instruments très peu volatils,
-#   le MACD standard génère trop de faux croisements sur 15min), RSI strict
-# Crypto ETF (BITO/IBIT) : MACD rapide 8/17/9 (forte volatilité, captures les
-#   moves intraday), RSI achat relevé à 55 car les crypto trendent fort
+# Forex 24/52/18 : peu volatile, MACD standard génère trop de faux croisements 15min
+# Crypto 8/17/9 : forte volatilité, MACD rapide capture les accélérations intraday
+# Vente sell_min=2 : requiert 2/3 critères baissiers — évite les sorties prématurées
 
 SIGNAL_PARAMS: dict[str, dict] = {
     "commodities": {
-        "rsi_buy":    48,   # légèrement au-dessus de 45 pour plus d'entrées
-        "rsi_sell":   65,
-        "macd_fast":  12,
-        "macd_slow":  26,
-        "macd_sig":    9,
-        "vol_mult":  1.3,   # volume signal > 1.3× EMA20(volume)
-        "sell_min":    2,   # critères baissiers requis sur 3 pour vendre
+        "rsi_buy": 48, "rsi_sell": 65,
+        "macd_fast": 12, "macd_slow": 26, "macd_sig": 9,
+        "vol_mult": 1.3, "sell_min": 2,
     },
     "forex": {
-        "rsi_buy":    45,
-        "rsi_sell":   62,   # plus bas : forex ETF atteignent rarement RSI 65
-        "macd_fast":  24,   # MACD lent adapté aux faibles amplitudes
-        "macd_slow":  52,
-        "macd_sig":   18,
-        "vol_mult":  1.2,   # forex ETFs ont des spikes de volume moins marqués
-        "sell_min":    2,
+        "rsi_buy": 45, "rsi_sell": 62,
+        "macd_fast": 24, "macd_slow": 52, "macd_sig": 18,
+        "vol_mult": 1.2, "sell_min": 2,
     },
     "crypto": {
-        "rsi_buy":    55,   # crypto trendent fort, RSI 55 capture les tendances
-        "rsi_sell":   72,   # seuil de survente élevé (crypto peut rester suracheté)
-        "macd_fast":   8,   # MACD rapide pour instruments très volatils
-        "macd_slow":  17,
-        "macd_sig":    9,
-        "vol_mult":  1.4,   # volume confirmation plus strict sur crypto
-        "sell_min":    2,
+        "rsi_buy": 55, "rsi_sell": 72,
+        "macd_fast": 8, "macd_slow": 17, "macd_sig": 9,
+        "vol_mult": 1.4, "sell_min": 2,
     },
 }
 
 # ============================================================
-# ACTIFS — Ticker Yahoo Finance + config par catégorie
+# PARAMÈTRES DE SIZING PAR CATÉGORIE (ATR-based)
+# ============================================================
+#
+# Formule : position_value = (portfolio × risk_pct) / (ATR_14 × atr_mult) × prix
+# Cap absolu = min(résultat, portfolio × max_pct)
+#
+# Interprétation : si le prix bouge de (ATR × atr_mult) contre nous,
+# la perte est exactement risk_pct × portfolio.
+#
+# Forex risk_pct réduit (0.5%) car ETF peu volatils avec stop 2%
+# Crypto risk_pct plus élevé (1.5%) pour capter les amplitudes
+
+SIZING_PARAMS: dict[str, dict] = {
+    "commodities": {"risk_pct": 0.010, "atr_period": 14, "atr_mult": 2.0, "max_pct": 0.15},
+    "forex":       {"risk_pct": 0.005, "atr_period": 14, "atr_mult": 1.5, "max_pct": 0.15},
+    "crypto":      {"risk_pct": 0.015, "atr_period": 14, "atr_mult": 2.5, "max_pct": 0.08},
+}
+
+# ============================================================
+# CONTRAINTES DE CORRÉLATION INTER-ACTIFS
+# ============================================================
+#
+# Paires mutuellement exclusives : impossible de détenir les deux simultanément
+# GLD+SLV : corrélation historique > 0.85 (deux métaux précieux)
+# BITO+IBIT : même sous-jacent (Bitcoin), doublon de risque
+
+CORR_EXCLUSIONS: list[frozenset] = [
+    frozenset({"GLD", "SLV"}),
+    frozenset({"BITO", "IBIT"}),
+]
+MAX_PER_CATEGORY = 2   # max positions simultanées par catégorie
+
+# ============================================================
+# ACTIFS
 # ============================================================
 
 ASSETS: dict[str, dict] = {
-    # ── Matières premières ───────────────────────────────────
     "GLD":  {"t212": "GLD_US_EQ",  "category": "🪙 Matières premières", "stop": 0.03, "pct": 0.15, "params": "commodities"},
     "SLV":  {"t212": "SLV_US_EQ",  "category": "🪙 Matières premières", "stop": 0.03, "pct": 0.15, "params": "commodities"},
     "USO":  {"t212": "USO_US_EQ",  "category": "🪙 Matières premières", "stop": 0.04, "pct": 0.12, "params": "commodities"},
     "UNG":  {"t212": "UNG_US_EQ",  "category": "🪙 Matières premières", "stop": 0.05, "pct": 0.10, "params": "commodities"},
-
-    # ── Forex ETF ────────────────────────────────────────────
     "FXE":  {"t212": "FXE_US_EQ",  "category": "💱 Forex",              "stop": 0.02, "pct": 0.15, "params": "forex"},
     "UUP":  {"t212": "UUP_US_EQ",  "category": "💱 Forex",              "stop": 0.02, "pct": 0.15, "params": "forex"},
     "FXB":  {"t212": "FXB_US_EQ",  "category": "💱 Forex",              "stop": 0.02, "pct": 0.10, "params": "forex"},
     "FXY":  {"t212": "FXY_US_EQ",  "category": "💱 Forex",              "stop": 0.02, "pct": 0.10, "params": "forex"},
-
-    # ── Crypto ETF ───────────────────────────────────────────
     "BITO": {"t212": "BITO_US_EQ", "category": "₿ Crypto",              "stop": 0.07, "pct": 0.08, "params": "crypto"},
     "IBIT": {"t212": "IBIT_US_EQ", "category": "₿ Crypto",              "stop": 0.07, "pct": 0.08, "params": "crypto"},
 }
 
 # ---- Paramètres techniques fixes ----
-EMA_SHORT = 20
-EMA_LONG  = 50
+EMA_SHORT  = 20
+EMA_LONG   = 50
 RSI_PERIOD = 14
 DATA_INTERVAL = "15m"
-DATA_PERIOD   = "5d"    # 5j × 26 barres = 130 barres, suffisant pour EMA50
-DAILY_PERIOD  = "60d"   # pour le filtre de tendance journalière
+DATA_PERIOD   = "5d"
+DAILY_PERIOD  = "60d"
 
 # ---- Gestion du risque ----
-DAILY_LOSS_LIMIT_PCT = float(os.getenv("DAILY_LOSS_LIMIT_PCT", "0.05"))
-MIN_ORDER_EUR    = 1.0
-MAX_OPEN_POSITIONS = 3  # positions simultanées maximum
+DAILY_LOSS_LIMIT_PCT    = float(os.getenv("DAILY_LOSS_LIMIT_PCT", "0.05"))
+MIN_ORDER_EUR           = 1.0
+MAX_OPEN_POSITIONS      = 3
+TRAILING_ACTIVATION_PCT = 0.02   # le trailing stop s'active à +2% de gain non réalisé
+
+# ---- Risk report ----
+VAR_CONFIDENCE   = 0.95   # VaR 95%
+VAR_HISTORY_DAYS = 20     # jours d'historique pour la VaR
+CORR_ALERT_THRESHOLD = 0.70   # alerte si corrélation moy. portfolio > ce seuil
 
 # ---- Constantes T212 ----
 T212_RATE_SLEEP: float = 0.4
 T212_TIMEOUT: int = 15
 T212_RETRY_DELAYS: tuple = (2, 4)
 
-# Sentinelle : distingue "erreur API" de "ressource absente (404)"
 _API_ERROR = object()
 
 # ---- Fichiers de stockage ----
-TRADES_FILE        = Path("trades.json")
-DAILY_PNL_FILE     = Path("daily_pnl.json")
+TRADES_FILE          = Path("trades.json")
+DAILY_PNL_FILE       = Path("daily_pnl.json")
 DISABLED_ASSETS_FILE = Path("disabled_assets.json")
+POSITIONS_META_FILE  = Path("positions_meta.json")   # trailing stop tracking
+RISK_STATS_FILE      = Path("risk_stats.json")        # win streak & historical risk
 
 # ---- Logging ----
 logging.basicConfig(
@@ -158,7 +179,7 @@ def load_json(path: Path, default) -> dict | list:
 
 
 def save_json(path: Path, data) -> None:
-    """Écriture atomique : temp file + rename pour éviter la corruption."""
+    """Écriture atomique via fichier temporaire — évite la corruption si GitHub Actions coupe."""
     tmp = path.with_suffix(".tmp")
     try:
         with open(tmp, "w", encoding="utf-8") as f:
@@ -176,7 +197,7 @@ def save_trade(trade: dict) -> None:
 
 
 def load_daily_pnl() -> dict:
-    data = load_json(DAILY_PNL_FILE, {})
+    data  = load_json(DAILY_PNL_FILE, {})
     today = str(datetime.now(ZoneInfo("America/New_York")).date())
     if data.get("date") != today:
         data = {"date": today, "start_value": None, "trades": 0, "pnl": 0.0}
@@ -186,10 +207,73 @@ def load_daily_pnl() -> dict:
 
 def update_daily_pnl(pnl_delta: float) -> None:
     data = load_daily_pnl()
-    data["pnl"] = round(data.get("pnl", 0.0) + pnl_delta, 2)
+    data["pnl"]    = round(data.get("pnl", 0.0) + pnl_delta, 2)
     data["trades"] = data.get("trades", 0) + 1
     save_json(DAILY_PNL_FILE, data)
 
+
+# ---- Trailing stop metadata ----
+
+def load_positions_meta() -> dict:
+    return load_json(POSITIONS_META_FILE, {})
+
+
+def save_positions_meta(meta: dict) -> None:
+    save_json(POSITIONS_META_FILE, meta)
+
+
+def init_position_meta(symbol: str, entry_price: float) -> None:
+    """Initialise le suivi d'une position à l'ouverture."""
+    meta = load_positions_meta()
+    meta[symbol] = {
+        "entry_price": entry_price,
+        "max_price":   entry_price,
+        "opened_at":   datetime.now().isoformat(),
+    }
+    save_positions_meta(meta)
+
+
+def update_max_price(symbol: str, current_price: float) -> float:
+    """Met à jour max_price si le prix courant est plus élevé. Retourne max_price."""
+    meta  = load_positions_meta()
+    entry = meta.get(symbol, {})
+    prev_max = entry.get("max_price", current_price)
+    if current_price > prev_max:
+        entry["max_price"] = current_price
+        meta[symbol] = entry
+        save_positions_meta(meta)
+        return current_price
+    return prev_max
+
+
+def clear_position_meta(symbol: str) -> None:
+    meta = load_positions_meta()
+    if symbol in meta:
+        meta.pop(symbol)
+        save_positions_meta(meta)
+
+
+# ---- Risk stats (win streak) ----
+
+def load_risk_stats() -> dict:
+    return load_json(RISK_STATS_FILE, {"win_streak": 0, "last_date": None})
+
+
+def record_day_result(pnl: float) -> int:
+    """
+    Appelé en fin de journée (daily_summary) avec le P&L du jour.
+    Met à jour le streak et retourne sa valeur courante.
+    """
+    stats = load_risk_stats()
+    today = str(datetime.now(ZoneInfo("America/New_York")).date())
+    if stats.get("last_date") != today:
+        stats["win_streak"] = stats.get("win_streak", 0) + 1 if pnl >= 0 else 0
+        stats["last_date"]  = today
+        save_json(RISK_STATS_FILE, stats)
+    return stats["win_streak"]
+
+
+# ---- Divers ----
 
 def is_asset_disabled(symbol: str) -> bool:
     return symbol in load_json(DISABLED_ASSETS_FILE, [])
@@ -209,7 +293,7 @@ def disable_asset(symbol: str) -> None:
 
 
 def send_telegram(text: str) -> None:
-    """Envoie un message Telegram avec 2 retries (délais 2s, 4s)."""
+    """Envoi avec 2 retries (2s, 4s)."""
     if not TELEGRAM_BOT_TOKEN or not CHAT_ID:
         return
     if len(text) > 4096:
@@ -227,7 +311,7 @@ def send_telegram(text: str) -> None:
                 return
             logger.warning("Telegram tentative %d/3 : %s", attempt + 1, resp.text[:100])
         except Exception as e:
-            logger.error("Telegram tentative %d/3 erreur : %s", attempt + 1, e)
+            logger.error("Telegram tentative %d/3 : %s", attempt + 1, e)
 
 
 # ============================================================
@@ -235,14 +319,10 @@ def send_telegram(text: str) -> None:
 # ============================================================
 
 def _t212_request(method: str, url: str, body: Optional[dict] = None) -> object:
-    """
-    Appel T212 avec retry automatique (2s, 4s).
-    Retourne : dict/list (succès) | None (404) | _API_ERROR (échec persistant).
-    """
+    """Retry automatique (2s, 4s). Retourne : json | None (404) | _API_ERROR."""
     headers = {"Authorization": T212_API_KEY}
     if body is not None:
         headers["Content-Type"] = "application/json"
-
     last_exc = None
     for attempt, delay in enumerate([0, *T212_RETRY_DELAYS]):
         if delay:
@@ -254,20 +334,16 @@ def _t212_request(method: str, url: str, body: Optional[dict] = None) -> object:
             if resp.status_code == 404:
                 return None
             if resp.status_code == 429:
-                logger.warning("T212 rate limit — retry %d/%d",
-                               attempt + 1, len(T212_RETRY_DELAYS) + 1)
+                logger.warning("T212 rate limit — retry %d", attempt + 1)
                 last_exc = "rate_limit"
                 continue
             resp.raise_for_status()
             time.sleep(T212_RATE_SLEEP)
             return resp.json()
         except Exception as e:
-            logger.warning("T212 %s tentative %d/%d : %s",
-                           url, attempt + 1, len(T212_RETRY_DELAYS) + 1, e)
+            logger.warning("T212 tentative %d/%d : %s", attempt + 1, len(T212_RETRY_DELAYS) + 1, e)
             last_exc = e
-
-    logger.error("T212 %s échec après %d tentatives : %s",
-                 url, len(T212_RETRY_DELAYS) + 1, last_exc)
+    logger.error("T212 %s échec : %s", url, last_exc)
     return _API_ERROR
 
 
@@ -293,10 +369,7 @@ def get_account() -> dict:
 
 
 def get_position(symbol: str) -> Optional[dict]:
-    """
-    Retourne la position ouverte ou None (pas de position).
-    Lève RuntimeError si T212 est inaccessible.
-    """
+    """Lève RuntimeError si T212 est inaccessible (distingué de "pas de position")."""
     data = t212_get(f"/api/v0/equity/portfolio/{ASSETS[symbol]['t212']}")
     if data is _API_ERROR:
         raise RuntimeError(f"T212 inaccessible pour {symbol}")
@@ -305,21 +378,20 @@ def get_position(symbol: str) -> Optional[dict]:
     avg_price     = float(data.get("averagePrice", 0))
     current_price = float(data.get("currentPrice", avg_price))
     qty           = float(data.get("quantity", 0))
-    ppl           = float(data.get("ppl", 0))
     plpc = ((current_price - avg_price) / avg_price) if avg_price else 0
     return {
-        "symbol":         symbol,
-        "qty":            qty,
+        "symbol":          symbol,
+        "qty":             qty,
         "avg_entry_price": avg_price,
-        "current_price":  current_price,
-        "unrealized_pl":  ppl,
+        "current_price":   current_price,
+        "unrealized_pl":   float(data.get("ppl", 0)),
         "unrealized_plpc": plpc,
-        "market_value":   qty * current_price,
+        "market_value":    qty * current_price,
     }
 
 
 def get_all_positions() -> list[dict]:
-    """Un seul appel T212 pour toutes les positions — utilisé dans run_strategy()."""
+    """Un seul appel T212 pour toutes les positions."""
     data = t212_get("/api/v0/equity/portfolio")
     if data is _API_ERROR or not data:
         return []
@@ -329,15 +401,15 @@ def get_all_positions() -> list[dict]:
         current_price = float(p.get("currentPrice", avg_price))
         qty           = float(p.get("quantity", 0))
         plpc = ((current_price - avg_price) / avg_price) if avg_price else 0
-        raw    = p.get("ticker", "")
-        symbol = raw.replace("_US_EQ", "").replace("_EQ", "")
+        symbol = p.get("ticker", "").replace("_US_EQ", "").replace("_EQ", "")
         result.append({
-            "symbol":         symbol,
-            "qty":            qty,
+            "symbol":          symbol,
+            "qty":             qty,
             "avg_entry_price": avg_price,
-            "current_price":  current_price,
-            "unrealized_pl":  float(p.get("ppl", 0)),
+            "current_price":   current_price,
+            "unrealized_pl":   float(p.get("ppl", 0)),
             "unrealized_plpc": plpc,
+            "market_value":    qty * current_price,
         })
     return result
 
@@ -347,11 +419,9 @@ def place_buy_order(symbol: str, amount_eur: float, current_price: float) -> boo
         logger.warning("%s montant trop faible : %.2f€", symbol, amount_eur)
         return False
     quantity = round(amount_eur / current_price, 6)
-    result = t212_post("/api/v0/equity/orders", {
-        "ticker":       ASSETS[symbol]["t212"],
-        "quantity":     quantity,
-        "type":         "MARKET",
-        "timeValidity": "DAY",
+    result   = t212_post("/api/v0/equity/orders", {
+        "ticker": ASSETS[symbol]["t212"], "quantity": quantity,
+        "type": "MARKET", "timeValidity": "DAY",
     })
     if result is _API_ERROR:
         logger.error("ACHAT %s échoué : T212 inaccessible", symbol)
@@ -372,10 +442,8 @@ def close_position(symbol: str) -> bool:
     if not position:
         return True
     result = t212_post("/api/v0/equity/orders", {
-        "ticker":       ASSETS[symbol]["t212"],
-        "quantity":     position["qty"],
-        "type":         "MARKET",
-        "timeValidity": "DAY",
+        "ticker": ASSETS[symbol]["t212"], "quantity": position["qty"],
+        "type": "MARKET", "timeValidity": "DAY",
     })
     if result is _API_ERROR:
         logger.error("VENTE %s échouée : T212 inaccessible", symbol)
@@ -390,9 +458,11 @@ def is_market_open() -> bool:
     now = datetime.now(ZoneInfo("America/New_York"))
     if now.weekday() >= 5:
         return False
-    open_t  = now.replace(hour=9,  minute=30, second=0, microsecond=0)
-    close_t = now.replace(hour=16, minute=0,  second=0, microsecond=0)
-    return open_t <= now <= close_t
+    return (
+        now.replace(hour=9, minute=30, second=0, microsecond=0)
+        <= now <=
+        now.replace(hour=16, minute=0, second=0, microsecond=0)
+    )
 
 
 # ============================================================
@@ -400,7 +470,6 @@ def is_market_open() -> bool:
 # ============================================================
 
 def fetch_ohlcv(symbol: str) -> Optional[pd.DataFrame]:
-    """Données 15min — on garde +1 barre pour l'exclusion de la bougie incomplète."""
     try:
         df = yf.download(
             symbol, period=DATA_PERIOD, interval=DATA_INTERVAL,
@@ -416,34 +485,25 @@ def fetch_ohlcv(symbol: str) -> Optional[pd.DataFrame]:
 
 
 def _fetch_daily_trend(symbol: str) -> str:
-    """
-    Filtre de tendance de fond journalière : compare le dernier cours à l'EMA50 daily.
-    Retourne 'bullish', 'bearish' ou 'unknown' (en cas d'erreur ou données insuffisantes).
-    Les données journalières (60 barres) sont légères et rapides à télécharger.
-    """
+    """EMA50 journalière — filtre de tendance de fond. Retourne 'bullish'/'bearish'/'unknown'."""
     try:
-        df = yf.download(
-            symbol, period=DAILY_PERIOD, interval="1d",
-            progress=False, auto_adjust=True,
-        )
+        df = yf.download(symbol, period=DAILY_PERIOD, interval="1d",
+                         progress=False, auto_adjust=True)
         if df is None or df.empty or len(df) < 50:
             return "unknown"
-        close     = df["Close"].squeeze()
-        ema50_d   = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
-        price     = float(close.iloc[-1])
-        return "bullish" if price > ema50_d else "bearish"
+        close = df["Close"].squeeze()
+        return "bullish" if float(close.iloc[-1]) > float(
+            close.ewm(span=50, adjust=False).mean().iloc[-1]
+        ) else "bearish"
     except Exception as e:
         logger.warning("_fetch_daily_trend %s : %s", symbol, e)
         return "unknown"
 
 
 def _volume_ok(df: pd.DataFrame, vol_mult: float) -> bool:
-    """
-    Filtre de volume : la dernière bougie clôturée doit dépasser vol_mult × EMA20(volume).
-    Retourne True si pas de données de volume (forex ETFs) pour ne pas bloquer le signal.
-    """
+    """Volume dernière bougie clôturée > vol_mult × EMA20(volume). True si pas de données."""
     try:
-        volume = df["Volume"].squeeze().iloc[:-1]   # exclure bougie en cours
+        volume = df["Volume"].squeeze().iloc[:-1]
         if volume.empty or volume.sum() == 0:
             return True
         vol_ema = float(volume.ewm(span=20, adjust=False).mean().iloc[-1])
@@ -466,25 +526,37 @@ def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
-def calc_macd(
-    series: pd.Series, fast: int, slow: int, signal_p: int
-) -> tuple[pd.Series, pd.Series]:
-    macd_line = calc_ema(series, fast) - calc_ema(series, slow)
-    return macd_line, calc_ema(macd_line, signal_p)
+def calc_macd(series: pd.Series, fast: int, slow: int, sig: int) -> tuple[pd.Series, pd.Series]:
+    line = calc_ema(series, fast) - calc_ema(series, slow)
+    return line, calc_ema(line, sig)
+
+
+def calc_atr(df: pd.DataFrame, period: int = 14) -> float:
+    """
+    ATR (Average True Range) sur les bougies clôturées.
+    Utilisé pour le sizing dynamique : stop_distance = ATR × atr_mult.
+    """
+    high  = df["High"].squeeze().iloc[:-1]
+    low   = df["Low"].squeeze().iloc[:-1]
+    close = df["Close"].squeeze().iloc[:-1]
+    tr = pd.concat([
+        (high - low),
+        (high - close.shift(1)).abs(),
+        (low  - close.shift(1)).abs(),
+    ], axis=1).max(axis=1)
+    atr = tr.ewm(span=period, adjust=False).mean()
+    return float(atr.iloc[-1]) if not atr.empty else 0.0
 
 
 def get_signals(symbol: str, params_key: str = "commodities") -> Optional[dict]:
     """
-    Calcule tous les indicateurs pour un actif.
-    Retourne un dict incluant le score de confluence 0-5.
+    Calcule tous les indicateurs pour un actif. Inclut ATR pour le sizing,
+    tendance journalière (filtre de fond), volume et score de confluence 0-5.
 
-    Bougies 15min : on exclut systématiquement la dernière (encore en formation)
-    pour éviter les faux croisements MACD mid-bar.
-
-    La tendance journalière (EMA50 daily) est fetchée séquentiellement — légère
-    (60 barres vs 130) et déjà parallélisée au niveau de _prefetch_signals().
+    Bougie en cours exclue (iloc[:-1]) pour éviter les faux signaux mid-bar.
     """
     params = SIGNAL_PARAMS[params_key]
+    sizing = SIZING_PARAMS[params_key]
 
     df          = fetch_ohlcv(symbol)
     daily_trend = _fetch_daily_trend(symbol)
@@ -492,7 +564,6 @@ def get_signals(symbol: str, params_key: str = "commodities") -> Optional[dict]:
     if df is None:
         return None
 
-    # Exclure la bougie en cours (pas encore clôturée)
     close = df["Close"].squeeze().iloc[:-1]
 
     ema20      = calc_ema(close, EMA_SHORT)
@@ -501,6 +572,7 @@ def get_signals(symbol: str, params_key: str = "commodities") -> Optional[dict]:
     macd_line, signal_line = calc_macd(
         close, params["macd_fast"], params["macd_slow"], params["macd_sig"]
     )
+    atr_val    = calc_atr(df, sizing["atr_period"])
 
     price       = float(close.iloc[-1])
     ema20_now   = float(ema20.iloc[-1])
@@ -511,13 +583,12 @@ def get_signals(symbol: str, params_key: str = "commodities") -> Optional[dict]:
     macd_prev   = float(macd_line.iloc[-2])
     signal_prev = float(signal_line.iloc[-2])
 
-    trend_bullish     = ema20_now > ema50_now
-    trend_bearish     = ema20_now < ema50_now
-    macd_bull_cross   = (macd_prev < signal_prev) and (macd_now > signal_now)
-    macd_bear_cross   = (macd_prev > signal_prev) and (macd_now < signal_now)
-    vol_ok            = _volume_ok(df, params["vol_mult"])
+    trend_bullish   = ema20_now > ema50_now
+    trend_bearish   = ema20_now < ema50_now
+    macd_bull_cross = (macd_prev < signal_prev) and (macd_now > signal_now)
+    macd_bear_cross = (macd_prev > signal_prev) and (macd_now < signal_now)
+    vol_ok          = _volume_ok(df, params["vol_mult"])
 
-    # Score de confluence ACHAT 0-5 — sert à prioriser les signaux simultanés
     confluence_score = (
         int(trend_bullish)
         + int(macd_bull_cross)
@@ -527,28 +598,29 @@ def get_signals(symbol: str, params_key: str = "commodities") -> Optional[dict]:
     )
 
     return {
-        "symbol":         symbol,
-        "price":          price,
-        "ema20":          ema20_now,
-        "ema50":          ema50_now,
-        "rsi":            rsi_now,
-        "rsi_buy":        params["rsi_buy"],
-        "rsi_sell":       params["rsi_sell"],
-        "sell_min":       params["sell_min"],
-        "macd":           macd_now,
-        "macd_signal":    signal_now,
+        "symbol":          symbol,
+        "price":           price,
+        "ema20":           ema20_now,
+        "ema50":           ema50_now,
+        "rsi":             rsi_now,
+        "rsi_buy":         params["rsi_buy"],
+        "rsi_sell":        params["rsi_sell"],
+        "sell_min":        params["sell_min"],
+        "macd":            macd_now,
+        "macd_signal":     signal_now,
         "macd_bull_cross": macd_bull_cross,
         "macd_bear_cross": macd_bear_cross,
-        "trend_bullish":  trend_bullish,
-        "trend_bearish":  trend_bearish,
-        "volume_ok":      vol_ok,
-        "daily_trend":    daily_trend,
+        "trend_bullish":   trend_bullish,
+        "trend_bearish":   trend_bearish,
+        "volume_ok":       vol_ok,
+        "daily_trend":     daily_trend,
+        "atr":             atr_val,
         "confluence_score": confluence_score,
     }
 
 
 def _prefetch_signals(symbols: list[str]) -> dict[str, Optional[dict]]:
-    """Télécharge les données de tous les actifs en parallèle (5 threads max)."""
+    """Télécharge 15min + daily pour tous les actifs en parallèle (5 threads)."""
     results: dict[str, Optional[dict]] = {}
     with ThreadPoolExecutor(max_workers=5) as pool:
         futures = {
@@ -566,16 +638,217 @@ def _prefetch_signals(symbols: list[str]) -> dict[str, Optional[dict]]:
 
 
 # ============================================================
-# SECTION 5 — STRATÉGIE & GESTION DU RISQUE
+# SECTION 5 — SIZING ATR + TRAILING STOP + CORRÉLATION
+# ============================================================
+
+def calculate_amount_atr(
+    symbol: str,
+    buying_power: float,
+    portfolio_value: float,
+    atr: float,
+    current_price: float,
+) -> float:
+    """
+    Sizing dynamique basé sur l'ATR.
+
+    Formule : (portfolio × risk_pct) / (ATR × atr_mult) × prix = montant €
+    Plafond  : min(résultat, portfolio × max_pct, buying_power)
+
+    Si ATR = 0 ou prix = 0 → fallback sur le % fixe de l'actif.
+    """
+    sizing = SIZING_PARAMS[ASSETS[symbol]["params"]]
+
+    if atr <= 0 or current_price <= 0:
+        return round(min(buying_power * ASSETS[symbol]["pct"], buying_power), 2)
+
+    risk_amount    = portfolio_value * sizing["risk_pct"]
+    stop_distance  = atr * sizing["atr_mult"]
+    shares         = risk_amount / stop_distance
+    position_value = shares * current_price
+
+    cap = min(
+        portfolio_value * sizing["max_pct"],
+        buying_power,
+    )
+    return round(min(position_value, cap), 2)
+
+
+def check_trailing_stop(position: dict, symbol: str) -> bool:
+    """
+    Trailing stop — actif uniquement si unrealized_plpc >= +TRAILING_ACTIVATION_PCT.
+    Prix de déclenchement : max_price_atteint × (1 - stop_loss_initial).
+    Avant l'activation du trailing, c'est le stop-loss classique qui protège.
+    """
+    if position["unrealized_plpc"] < TRAILING_ACTIVATION_PCT:
+        return False
+
+    meta      = load_positions_meta()
+    max_price = meta.get(symbol, {}).get("max_price", position["current_price"])
+    stop_pct  = ASSETS[symbol]["stop"]
+    stop_price = max_price * (1 - stop_pct)
+
+    triggered = position["current_price"] <= stop_price
+    if triggered:
+        logger.info(
+            "%s trailing stop : %.4f <= max_price=%.4f × (1-%.0f%%) = %.4f",
+            symbol, position["current_price"], max_price, stop_pct * 100, stop_price,
+        )
+    return triggered
+
+
+def check_correlation_allowed(symbol: str, positions_map: dict) -> tuple[bool, str]:
+    """
+    Vérifie que l'ouverture d'une position sur `symbol` respecte les règles de corrélation.
+    Retourne (autorisé, raison_si_refus).
+
+    Règles :
+    1. Paires mutuellement exclusives (GLD+SLV, BITO+IBIT)
+    2. Max MAX_PER_CATEGORY positions simultanées par catégorie
+    """
+    open_symbols    = {sym for sym in ASSETS if sym in positions_map}
+    asset_category  = ASSETS[symbol]["category"]
+
+    # Règle 1 : paires exclusives
+    for group in CORR_EXCLUSIONS:
+        if symbol in group:
+            partners = group - {symbol}
+            for partner in partners:
+                if partner in open_symbols:
+                    return False, f"corrélation élevée avec {partner} (déjà en position)"
+
+    # Règle 2 : limite par catégorie
+    same_cat = sum(
+        1 for sym in open_symbols
+        if ASSETS.get(sym, {}).get("category") == asset_category
+    )
+    if same_cat >= MAX_PER_CATEGORY:
+        return False, f"limite {MAX_PER_CATEGORY} positions pour {asset_category}"
+
+    return True, ""
+
+
+# ============================================================
+# SECTION 6 — MÉTRIQUES DE RISQUE (VaR, exposition, corrélation)
+# ============================================================
+
+def _fetch_historical_returns(symbols: list[str], days: int = 25) -> dict[str, pd.Series]:
+    """
+    Télécharge les rendements journaliers en parallèle pour le calcul de VaR
+    et de corrélation portfolio. Appel groupé pour minimiser les requêtes réseau.
+    """
+    results: dict[str, pd.Series] = {}
+
+    def _one(sym: str) -> Optional[pd.Series]:
+        try:
+            df = yf.download(sym, period=f"{days + 5}d", interval="1d",
+                             progress=False, auto_adjust=True)
+            if df is None or df.empty or len(df) < days:
+                return None
+            return df["Close"].squeeze().pct_change().dropna().tail(days)
+        except Exception:
+            return None
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futures = {pool.submit(_one, sym): sym for sym in symbols}
+        for future in as_completed(futures):
+            sym = futures[future]
+            try:
+                ret = future.result()
+                if ret is not None:
+                    results[sym] = ret
+            except Exception:
+                pass
+    return results
+
+
+def calculate_var_95(
+    positions: list[dict],
+    hist_returns: dict[str, pd.Series],
+    portfolio_value: float,
+) -> Optional[tuple[float, float]]:
+    """
+    VaR historique 95% sur VAR_HISTORY_DAYS jours de rendements journaliers.
+
+    Retourne (var_pct, var_eur) ou None si données insuffisantes.
+
+    Méthode : rendements journaliers pondérés par la valeur de marché de chaque position,
+    puis 5e percentile de la distribution des rendements portfolio.
+    """
+    if not positions or not hist_returns:
+        return None
+
+    # Filtrer les positions dont on a l'historique
+    valid = [p for p in positions if p["symbol"] in hist_returns]
+    if not valid:
+        return None
+
+    total_value = sum(p.get("market_value", 0) for p in valid)
+    if total_value == 0:
+        return None
+
+    n_days = VAR_HISTORY_DAYS
+    port_returns = np.zeros(n_days)
+
+    for p in valid:
+        sym    = p["symbol"]
+        weight = p.get("market_value", 0) / total_value
+        ret    = hist_returns[sym].values
+        k      = min(len(ret), n_days)
+        port_returns[-k:] += weight * ret[-k:]
+
+    var_pct = float(np.percentile(port_returns, (1 - VAR_CONFIDENCE) * 100))
+    var_eur = var_pct * portfolio_value
+
+    return round(var_pct * 100, 2), round(var_eur, 2)
+
+
+def calculate_exposure(
+    positions: list[dict], portfolio_value: float
+) -> dict[str, float]:
+    """Exposition par catégorie en % du portfolio total."""
+    exposure: dict[str, float] = {}
+    for p in positions:
+        cat = ASSETS.get(p["symbol"], {}).get("category", "Autre")
+        exposure[cat] = exposure.get(cat, 0) + p.get("market_value", 0)
+    if portfolio_value > 0:
+        return {k: round(v / portfolio_value * 100, 1) for k, v in exposure.items()}
+    return {k: 0.0 for k in exposure}
+
+
+def calculate_portfolio_correlation(
+    positions: list[dict],
+    hist_returns: dict[str, pd.Series],
+) -> Optional[float]:
+    """
+    Corrélation moyenne par paires des positions ouvertes (sur 20j de rendements daily).
+    Retourne None si < 2 positions ou données insuffisantes.
+    Alerte dans le rapport si résultat > CORR_ALERT_THRESHOLD.
+    """
+    symbols = [p["symbol"] for p in positions if p["symbol"] in hist_returns]
+    if len(symbols) < 2:
+        return None
+
+    ret_df = pd.DataFrame({sym: hist_returns[sym] for sym in symbols}).dropna()
+    if ret_df.empty or len(ret_df) < 10:
+        return None
+
+    corr_matrix = ret_df.corr().values
+    n = len(corr_matrix)
+    mask = ~np.eye(n, dtype=bool)
+    return round(float(corr_matrix[mask].mean()), 2)
+
+
+# ============================================================
+# SECTION 7 — STRATÉGIE & GESTION DU RISQUE
 # ============================================================
 
 def should_buy(signals: dict, has_position: bool) -> bool:
     """
-    Achat si toutes les conditions sont réunies :
+    Conditions d'achat (toutes requises) :
     - EMA20 > EMA50 (tendance 15min haussière)
-    - RSI < seuil de la catégorie (48 commodities / 45 forex / 55 crypto)
+    - RSI sous seuil catégorie (48 / 45 / 55)
     - MACD croisement haussier sur bougie clôturée
-    - Tendance journalière NON baissière (gate dur : on ne trade pas contre EMA50 daily)
+    - Tendance journalière NON baissière (EMA50 daily — gate dur)
     """
     if has_position:
         return False
@@ -589,8 +862,8 @@ def should_buy(signals: dict, has_position: bool) -> bool:
 
 def should_sell(signals: dict, has_position: bool) -> bool:
     """
-    Vente si au moins sell_min critères baissiers sont réunis (défaut : 2/3).
-    Réduit les sorties prématurées dues à un RSI bref ou un faux croisement MACD.
+    Vente si sell_min critères baissiers réunis (défaut 2/3).
+    Évite les sorties prématurées sur un seul indicateur momentané.
     """
     if not has_position:
         return False
@@ -607,21 +880,17 @@ def check_stop_loss(position: dict, symbol: str) -> bool:
 
 
 def _close_all_positions() -> None:
-    """Clôture toutes les positions — appelé par le circuit breaker."""
     for symbol in list(ASSETS.keys()):
         try:
             pos = get_position(symbol)
             if pos:
                 close_position(symbol)
+                clear_position_meta(symbol)
         except RuntimeError as e:
             logger.error("_close_all_positions %s : %s", symbol, e)
 
 
 def check_daily_loss_limit() -> bool:
-    """
-    Vérifie la limite journalière.
-    Si atteinte : clôture TOUTES les positions puis arrête le trading.
-    """
     account = get_account()
     if not account:
         return False
@@ -635,10 +904,10 @@ def check_daily_loss_limit() -> bool:
         return False
     loss_pct = (account["portfolio_value"] - start) / start
     if loss_pct <= -DAILY_LOSS_LIMIT_PCT:
-        logger.warning("Circuit breaker : %.2f%% — clôture de toutes les positions", loss_pct * 100)
+        logger.warning("Circuit breaker : %.2f%%", loss_pct * 100)
         _close_all_positions()
         send_telegram(
-            f"⛔ <b>Circuit breaker déclenché</b> ({loss_pct*100:+.1f}%)\n"
+            f"⛔ <b>Circuit breaker</b> ({loss_pct*100:+.1f}%)\n"
             f"Seuil : -{DAILY_LOSS_LIMIT_PCT*100:.0f}% | Toutes positions clôturées.\n"
             "Trading suspendu jusqu'à demain."
         )
@@ -646,13 +915,35 @@ def check_daily_loss_limit() -> bool:
     return False
 
 
-def calculate_amount(symbol: str, buying_power: float) -> float:
-    return round(buying_power * ASSETS[symbol]["pct"], 2)
-
-
 # ============================================================
-# SECTION 6 — EXÉCUTION DES ORDRES
+# SECTION 8 — EXÉCUTION DES ORDRES
 # ============================================================
+
+def _execute_trailing_stop(
+    symbol: str, signals: dict, position: dict, max_price: float, mode: str
+) -> None:
+    stop_pct    = ASSETS[symbol]["stop"]
+    stop_price  = max_price * (1 - stop_pct)
+    asset_cfg   = ASSETS[symbol]
+    if close_position(symbol):
+        pl = position["unrealized_pl"]
+        update_daily_pnl(pl)
+        clear_position_meta(symbol)
+        send_telegram(
+            f"📉 <b>TRAILING STOP {symbol}</b> [{mode}] {asset_cfg['category']}\n"
+            f"P&L : <b>{pl:+.2f} €</b> ({position['unrealized_plpc']*100:+.1f}%)\n"
+            f"Prix : {signals['price']:.4f} $ | Max atteint : {max_price:.4f} $\n"
+            f"Stop déclenché à {stop_price:.4f} $ (-{stop_pct*100:.0f}% du max)"
+        )
+        save_trade({
+            "symbol": symbol, "side": "SELL_TRAILING",
+            "category": asset_cfg["category"],
+            "price": signals["price"], "pl": pl,
+            "max_price": max_price, "stop_price": stop_price,
+            "timestamp": datetime.now().isoformat(),
+        })
+        logger.info("TRAILING STOP %s — PL=%.2f€", symbol, pl)
+
 
 def _execute_stop_loss(symbol: str, signals: dict, position: dict, mode: str) -> None:
     asset_cfg = ASSETS[symbol]
@@ -662,6 +953,7 @@ def _execute_stop_loss(symbol: str, signals: dict, position: dict, mode: str) ->
     if close_position(symbol):
         pl = position["unrealized_pl"]
         update_daily_pnl(pl)
+        clear_position_meta(symbol)
         send_telegram(
             f"🛑 <b>STOP-LOSS {symbol}</b> [{mode}] {asset_cfg['category']}\n"
             f"Perte : <b>{pl:+.2f} €</b> ({position['unrealized_plpc']*100:+.1f}%)\n"
@@ -680,6 +972,7 @@ def _execute_sell(symbol: str, signals: dict, position: dict, mode: str) -> None
     if close_position(symbol):
         pl = position["unrealized_pl"]
         update_daily_pnl(pl)
+        clear_position_meta(symbol)
         reasons = []
         if signals["rsi"] > signals["rsi_sell"]:
             reasons.append(f"RSI={signals['rsi']:.1f}")
@@ -704,91 +997,122 @@ def _execute_sell(symbol: str, signals: dict, position: dict, mode: str) -> None
 
 
 def _execute_buy(
-    symbol: str, signals: dict, buying_power: float, portfolio_value: float, mode: str
+    symbol: str, signals: dict,
+    buying_power: float, portfolio_value: float,
+    positions_map: dict, mode: str,
 ) -> None:
     asset_cfg = ASSETS[symbol]
     stop_pct  = asset_cfg["stop"]
-    amount    = calculate_amount(symbol, buying_power)
+    amount    = calculate_amount_atr(
+        symbol, buying_power, portfolio_value, signals["atr"], signals["price"]
+    )
     if place_buy_order(symbol, amount, signals["price"]):
-        qty_approx   = amount / signals["price"]
-        daily_emoji  = {"bullish": "🌞", "bearish": "🌧️", "unknown": "❓"}.get(
+        qty_approx  = amount / signals["price"]
+        daily_emoji = {"bullish": "🌞", "bearish": "🌧️", "unknown": "❓"}.get(
             signals["daily_trend"], "❓"
         )
-        vol_emoji    = "✅" if signals["volume_ok"] else "⚠️"
+        # ATR sizing info
+        sizing      = SIZING_PARAMS[asset_cfg["params"]]
+        atr_stop_eur = portfolio_value * sizing["risk_pct"]
         send_telegram(
             f"📥 <b>ACHAT {symbol}</b> [{mode}] {asset_cfg['category']}\n"
             f"Montant : <b>{amount:.2f} €</b> (≈ {qty_approx:.4f} actions)\n"
             f"Prix : {signals['price']:.4f} $ | RSI : {signals['rsi']:.1f}/{signals['rsi_buy']}\n"
-            f"EMA ✅ | MACD ↗ ✅ | Volume : {vol_emoji} | Trend J : {daily_emoji}\n"
+            f"ATR : {signals['atr']:.4f} $ | Risque max : {atr_stop_eur:.2f} €\n"
+            f"EMA ✅ | MACD ↗ ✅ | Vol : {'✅' if signals['volume_ok'] else '⚠️'} | "
+            f"Trend J : {daily_emoji}\n"
             f"Confluence : <b>{signals['confluence_score']}/5</b> | "
-            f"Stop-loss : -{stop_pct*100:.0f}%\n"
-            f"Portfolio : {portfolio_value:.2f} €"
+            f"Stop : -{stop_pct*100:.0f}% | Trailing dès +{TRAILING_ACTIVATION_PCT*100:.0f}%"
         )
+        init_position_meta(symbol, signals["price"])
         save_trade({
             "symbol": symbol, "side": "BUY",
             "category": asset_cfg["category"],
             "price": signals["price"], "amount_eur": amount,
+            "atr": signals["atr"],
             "confluence_score": signals["confluence_score"],
             "daily_trend": signals["daily_trend"],
             "timestamp": datetime.now().isoformat(),
         })
-        logger.info("ACHAT %s — %.2f€ | confluence=%d/5", symbol, amount, signals["confluence_score"])
+        logger.info("ACHAT %s — %.2f€ | ATR=%.4f | confluence=%d/5",
+                    symbol, amount, signals["atr"], signals["confluence_score"])
 
 
 def _handle_asset(
     symbol: str,
     signals: dict,
     position: Optional[dict],
+    positions_map: dict,
     buying_power: float,
     portfolio_value: float,
     mode: str,
     open_count: int,
 ) -> int:
     """
-    Gère un actif. Retourne le delta de positions ouvertes :
-    +1 si achat, -1 si vente ou stop-loss, 0 sinon.
+    Gère un actif. Retourne le delta de positions : +1 achat, -1 vente/SL, 0 sinon.
+
+    Ordre de priorité :
+    1. Trailing stop (si gain >= +2% et prix retombé)
+    2. Stop-loss classique
+    3. Signal de vente (2/3 critères)
+    4. Signal d'achat (vérification corrélation + limite positions)
     """
     has_position = position is not None
 
-    # 1. Stop-loss — priorité absolue
-    if has_position and check_stop_loss(position, symbol):
-        _execute_stop_loss(symbol, signals, position, mode)
-        return -1
+    if has_position:
+        # Mise à jour du max_price pour le trailing stop
+        max_price = update_max_price(symbol, position["current_price"])
 
-    # 2. Vente (2/3 critères requis par défaut)
-    if has_position and should_sell(signals, has_position):
-        _execute_sell(symbol, signals, position, mode)
-        return -1
+        # 1. Trailing stop
+        if check_trailing_stop(position, symbol):
+            _execute_trailing_stop(symbol, signals, position, max_price, mode)
+            return -1
 
-    # 3. Achat — uniquement si sous la limite de positions simultanées
-    if not has_position and should_buy(signals, has_position):
-        if open_count >= MAX_OPEN_POSITIONS:
-            logger.info(
-                "%s : signal ACHAT ignoré [confluence=%d/5] — limite %d positions atteinte",
-                symbol, signals["confluence_score"], MAX_OPEN_POSITIONS,
-            )
-            return 0
-        _execute_buy(symbol, signals, buying_power, portfolio_value, mode)
-        return 1
+        # 2. Stop-loss classique
+        if check_stop_loss(position, symbol):
+            _execute_stop_loss(symbol, signals, position, mode)
+            return -1
+
+        # 3. Vente (2/3 critères)
+        if should_sell(signals, has_position):
+            _execute_sell(symbol, signals, position, mode)
+            return -1
+
+    else:
+        # Nettoyage si la position a été fermée externalement
+        clear_position_meta(symbol)
+
+        # 4. Achat
+        if should_buy(signals, has_position):
+            if open_count >= MAX_OPEN_POSITIONS:
+                logger.info("%s : achat ignoré [score=%d/5] — limite %d positions",
+                            symbol, signals["confluence_score"], MAX_OPEN_POSITIONS)
+                return 0
+
+            allowed, reason = check_correlation_allowed(symbol, positions_map)
+            if not allowed:
+                logger.info("%s : achat bloqué — %s", symbol, reason)
+                return 0
+
+            _execute_buy(symbol, signals, buying_power, portfolio_value, positions_map, mode)
+            return 1
 
     logger.debug(
         "%s : %s | RSI=%.1f/%d | trend=%s | MACD↗=%s | vol=%s | daily=%s | score=%d/5",
-        symbol,
-        "position" if has_position else "attente",
+        symbol, "position" if has_position else "attente",
         signals["rsi"], signals["rsi_buy"],
         signals["trend_bullish"], signals["macd_bull_cross"],
-        signals["volume_ok"], signals["daily_trend"],
-        signals["confluence_score"],
+        signals["volume_ok"], signals["daily_trend"], signals["confluence_score"],
     )
     return 0
 
 
 # ============================================================
-# SECTION 7 — BOUCLE PRINCIPALE
+# SECTION 9 — BOUCLE PRINCIPALE
 # ============================================================
 
 def run_strategy() -> None:
-    """Point d'entrée de l'analyse — appelé par GitHub Actions toutes les 20 min."""
+    """Appelé toutes les 20 min par GitHub Actions."""
     logger.info("=== Analyse (%d actifs) ===", len(ASSETS))
 
     if not is_market_open():
@@ -807,49 +1131,50 @@ def run_strategy() -> None:
     portfolio_value = account["portfolio_value"]
     mode            = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
 
-    # Un seul appel T212 pour toutes les positions existantes
-    raw_positions  = get_all_positions()
-    positions_map  = {p["symbol"]: p for p in raw_positions}
-    open_count     = sum(1 for sym in ASSETS if sym in positions_map)
+    raw_positions = get_all_positions()
+    positions_map = {p["symbol"]: p for p in raw_positions}
+    open_count    = sum(1 for sym in ASSETS if sym in positions_map)
 
-    # Téléchargement parallèle (5 threads) : 15min + daily par actif
     active_symbols = [sym for sym in ASSETS if not is_asset_disabled(sym)]
     all_signals    = _prefetch_signals(active_symbols)
 
-    # Ordre de traitement :
-    # 1. Actifs en position ouverte d'abord (stop-loss / vente prioritaires)
-    # 2. Parmi les signaux d'achat, trier par confluence décroissante
-    #    → si on atteint MAX_OPEN_POSITIONS, les meilleurs signaux sont traités en premier
+    # Traiter d'abord les positions ouvertes (stop-loss / ventes),
+    # puis les achats potentiels triés par confluence décroissante
     def _sort_key(sym: str) -> tuple:
         sig = all_signals.get(sym)
         if sig is None:
             return (2, 0)
-        if sym in positions_map:
-            return (0, 0)   # positions ouvertes → prioritaires
-        return (1, -sig.get("confluence_score", 0))
+        return (0, 0) if sym in positions_map else (1, -sig.get("confluence_score", 0))
 
-    ordered = sorted(active_symbols, key=_sort_key)
-
-    for symbol in ordered:
-        signals  = all_signals.get(symbol)
+    for symbol in sorted(active_symbols, key=_sort_key):
+        signals = all_signals.get(symbol)
         if signals is None:
-            logger.warning("%s : données indisponibles, actif ignoré", symbol)
+            logger.warning("%s : données indisponibles", symbol)
             continue
-        position = positions_map.get(symbol)
-        delta    = _handle_asset(
-            symbol, signals, position,
+        delta = _handle_asset(
+            symbol, signals, positions_map.get(symbol), positions_map,
             buying_power, portfolio_value, mode, open_count,
         )
         open_count += delta
+        # Mettre à jour positions_map si un achat vient d'être effectué
+        if delta == 1:
+            positions_map[symbol] = {"symbol": symbol}
 
 
 def daily_summary() -> None:
-    """Résumé complet envoyé chaque soir à 16h05 NY."""
+    """
+    Résumé 16h05 NY enrichi :
+    - P&L, positions, streak
+    - VaR 95% historique 20j
+    - Exposition par catégorie
+    - Alerte corrélation portfolio
+    """
     account   = get_account()
     positions = get_all_positions()
     daily     = load_daily_pnl()
     mode      = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
     pnl       = daily.get("pnl", 0.0)
+    streak    = record_day_result(pnl)
 
     lines = [
         f"📊 <b>Résumé {datetime.now().strftime('%d/%m/%Y')}</b> [{mode}]",
@@ -859,28 +1184,69 @@ def daily_summary() -> None:
         f"📈 Investi : {account.get('invested', 0):.2f} €",
         f"{'📈' if pnl >= 0 else '📉'} P&L du jour : <b>{pnl:+.2f} €</b>",
         f"🔄 Trades : {daily.get('trades', 0)}",
+        f"{'🏆' if streak > 0 else '💀'} Série gagnante : <b>{streak} jour(s)</b>",
         "",
     ]
 
+    # Positions ouvertes groupées par catégorie
     if positions:
-        by_category: dict[str, list] = {}
+        by_cat: dict[str, list] = {}
         for p in positions:
             cat = ASSETS.get(p["symbol"], {}).get("category", "Autre")
-            by_category.setdefault(cat, []).append(p)
-
+            by_cat.setdefault(cat, []).append(p)
         lines.append("📋 <b>Positions ouvertes :</b>")
-        for cat, pos_list in by_category.items():
+        for cat, pos_list in by_cat.items():
             lines.append(f"\n{cat}")
             for p in pos_list:
                 arrow = "📈" if p["unrealized_pl"] >= 0 else "📉"
+                meta  = load_positions_meta().get(p["symbol"], {})
+                trail = f" | max={meta['max_price']:.4f}" if "max_price" in meta else ""
                 lines.append(
                     f"  {arrow} <b>{p['symbol']}</b> | "
-                    f"{p['avg_entry_price']:.4f}→{p['current_price']:.4f} $ | "
+                    f"{p['avg_entry_price']:.4f}→{p['current_price']:.4f} ${trail} | "
                     f"P&L : {p['unrealized_pl']:+.2f} € ({p['unrealized_plpc']*100:+.1f}%)"
                 )
     else:
         lines.append("Aucune position ouverte ce soir")
 
+    portfolio_value = account.get("portfolio_value", 0)
+
+    # Métriques de risque (téléchargement parallèle des rendements historiques)
+    if positions and portfolio_value > 0:
+        symbols_held   = [p["symbol"] for p in positions if p["symbol"] in ASSETS]
+        hist_returns   = _fetch_historical_returns(symbols_held, days=VAR_HISTORY_DAYS + 5)
+
+        # Exposition par catégorie
+        exposure = calculate_exposure(positions, portfolio_value)
+        if exposure:
+            lines.append("\n📊 <b>Exposition par catégorie :</b>")
+            for cat, pct in exposure.items():
+                bar = "█" * int(pct / 10) + "░" * (10 - int(pct / 10))
+                lines.append(f"  {cat} : {pct:.1f}% {bar}")
+
+        # VaR 95%
+        var_result = calculate_var_95(positions, hist_returns, portfolio_value)
+        if var_result:
+            var_pct, var_eur = var_result
+            lines.append(
+                f"\n📉 <b>VaR 95% ({VAR_HISTORY_DAYS}j)</b> : "
+                f"{var_pct:.2f}% (≈ {var_eur:.2f} €)"
+            )
+
+        # Corrélation portfolio
+        avg_corr = calculate_portfolio_correlation(positions, hist_returns)
+        if avg_corr is not None:
+            corr_flag = "⚠️ ALERTE" if avg_corr > CORR_ALERT_THRESHOLD else "✅"
+            lines.append(
+                f"🔗 Corrélation moy. portfolio : {avg_corr:.2f} "
+                f"(seuil {CORR_ALERT_THRESHOLD}) {corr_flag}"
+            )
+            if avg_corr > CORR_ALERT_THRESHOLD:
+                lines.append(
+                    "  → Positions corrélées : risque de pertes simultanées élevé."
+                )
+
+    # Actifs désactivés
     disabled = load_json(DISABLED_ASSETS_FILE, [])
     if disabled:
         lines.append(f"\n⚠️ Actifs désactivés : {', '.join(disabled)}")
@@ -890,14 +1256,19 @@ def daily_summary() -> None:
 
 
 # ============================================================
-# SECTION 8 — MAIN & SCHEDULER (exécution locale uniquement)
+# SECTION 10 — MAIN & SCHEDULER (exécution locale uniquement)
 # ============================================================
 
 def main() -> None:
     logger.info("Démarrage TradingBot — %s | %d actifs",
                 "DEMO" if T212_DEMO else "RÉEL", len(ASSETS))
 
-    for f, default in [(TRADES_FILE, []), (DAILY_PNL_FILE, {}), (DISABLED_ASSETS_FILE, [])]:
+    all_files = [
+        (TRADES_FILE, []), (DAILY_PNL_FILE, {}),
+        (DISABLED_ASSETS_FILE, []), (POSITIONS_META_FILE, {}),
+        (RISK_STATS_FILE, {"win_streak": 0, "last_date": None}),
+    ]
+    for f, default in all_files:
         if not f.exists():
             save_json(f, default)
     load_daily_pnl()
@@ -909,38 +1280,21 @@ def main() -> None:
     for symbol, cfg in ASSETS.items():
         categories.setdefault(cfg["category"], []).append(symbol)
 
-    assets_text = "\n".join(
-        f"{cat} : {', '.join(syms)}" for cat, syms in categories.items()
-    )
-
-    params_text = "\n".join(
-        f"{k} → RSI achat &lt;{v['rsi_buy']} | MACD {v['macd_fast']}/{v['macd_slow']}/{v['macd_sig']}"
-        for k, v in SIGNAL_PARAMS.items()
-    )
-
     send_telegram(
         f"🤖 <b>TradingBot démarré</b> — {mode}\n\n"
-        f"{assets_text}\n\n"
-        f"<b>Paramètres par catégorie :</b>\n{params_text}\n\n"
-        f"Filtre tendance : EMA50 journalière | Volume : EMA20×1.2–1.4\n"
-        f"Max positions : {MAX_OPEN_POSITIONS} | Stop-loss : Matières 3–5% | Forex 2% | Crypto 7%\n\n"
+        + "\n".join(f"{cat} : {', '.join(syms)}" for cat, syms in categories.items())
+        + f"\n\nSizing ATR | Trailing stop +{TRAILING_ACTIVATION_PCT*100:.0f}% | "
+        f"Max {MAX_OPEN_POSITIONS} positions\n"
+        f"Corrélation : GLD≠SLV, BITO≠IBIT | Max {MAX_PER_CATEGORY}/catégorie\n\n"
         f"💼 Portfolio : <b>{account.get('portfolio_value', 0):.2f} €</b>\n"
         f"💵 Disponible : <b>{account.get('buying_power', 0):.2f} €</b>"
     )
 
     scheduler = BlockingScheduler(timezone="America/New_York")
-
-    scheduler.add_job(
-        run_strategy, "cron",
-        day_of_week="mon-fri", hour="9-15", minute="5,25,45",
-        id="run_strategy", name="Analyse signaux",
-    )
-    scheduler.add_job(
-        daily_summary, "cron",
-        day_of_week="mon-fri", hour=16, minute=5,
-        id="daily_summary", name="Résumé journalier",
-    )
-
+    scheduler.add_job(run_strategy, "cron", day_of_week="mon-fri",
+                      hour="9-15", minute="5,25,45", id="run_strategy")
+    scheduler.add_job(daily_summary, "cron", day_of_week="mon-fri",
+                      hour=16, minute=5, id="daily_summary")
     logger.info("Scheduler actif — 20 min / 9h30–16h NY / lun–ven")
     try:
         scheduler.start()

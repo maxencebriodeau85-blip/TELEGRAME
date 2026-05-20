@@ -53,6 +53,6 @@ jobs:
           git config user.email "trading-bot@users.noreply.github.com"
           git config user.name "InvestBot"
           git pull --rebase origin claude/telegram-investbot-zJXWJ
-          git add trades.json daily_pnl.json disabled_assets.json 2>/dev/null || true
+          git add trades.json daily_pnl.json disabled_assets.json positions_meta.json risk_stats.json 2>/dev/null || true
           git diff --staged --quiet || git commit -m "bot: mise à jour état [skip ci]"
           git push origin claude/telegram-investbot-zJXWJ
