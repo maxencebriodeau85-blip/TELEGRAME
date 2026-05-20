@@ -1,10 +1,14 @@
 name: TradingBot — Trading 212
 
 on:
+  push:
+    branches:
+      - claude/telegram-investbot-zJXWJ
+    paths:
+      - '.github/workflows/trading_bot.yml'
   schedule:
-    # Toutes les 20 min, 13h05-21h05 UTC = 9h05-17h05 ET (couvre NYSE 9h30-16h)
     - cron: '5,25,45 13-21 * * 1-5'
-  workflow_dispatch: # Lancement manuel depuis GitHub possible
+  workflow_dispatch:
 
 permissions:
   contents: write
