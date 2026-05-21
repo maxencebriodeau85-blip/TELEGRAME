@@ -692,13 +692,13 @@ def close_position(symbol: str) -> bool:
 
 
 def is_market_open() -> bool:
-    now = datetime.now(ZoneInfo("America/New_York"))
+    now = datetime.now(ZoneInfo("Europe/London"))
     if now.weekday() >= 5:
         return False
     return (
-        now.replace(hour=9, minute=30, second=0, microsecond=0)
+        now.replace(hour=8, minute=0, second=0, microsecond=0)
         <= now <=
-        now.replace(hour=16, minute=0, second=0, microsecond=0)
+        now.replace(hour=16, minute=30, second=0, microsecond=0)
     )
 
 

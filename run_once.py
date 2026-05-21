@@ -58,19 +58,19 @@ if __name__ == "__main__":
             save_json(path, default)
     load_daily_pnl()
 
-    now_ny = datetime.now(ZoneInfo("America/New_York"))
+    now_ldn = datetime.now(ZoneInfo("Europe/London"))
 
     # Traiter les commandes Telegram (/pause, /resume, /status) à chaque run
     poll_telegram_commands()
 
     if not is_market_open():
         logger.info("Marché fermé — analyse ignorée")
-    elif now_ny.hour == 16 and 5 <= now_ny.minute < 25:
-        # Résumé journalier — envoyé une seule fois (fenêtre 16h05–16h24 NY)
+    elif now_ldn.hour == 16 and 30 <= now_ldn.minute < 50:
+        # Résumé journalier — envoyé une seule fois (fenêtre 16h30–16h49 London, après clôture LSE)
         logger.info("Envoi du résumé journalier")
         daily_summary()
-    elif now_ny.hour == 9 and 30 <= now_ny.minute < 50:
-        # Message d'ouverture — envoyé une seule fois à l'ouverture du marché
+    elif now_ldn.hour == 8 and 0 <= now_ldn.minute < 20:
+        # Message d'ouverture — envoyé une seule fois à l'ouverture LSE (8h00–8h19 London)
         mode = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
         account = get_account()
         bal = f"{account['portfolio_value']:.2f}€" if account else "N/A"

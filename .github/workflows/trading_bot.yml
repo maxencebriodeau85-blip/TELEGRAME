@@ -10,8 +10,8 @@ on:
       - 'requirements.txt'
       - 'config.yaml'
   schedule:
-    # Toutes les 10 min, 13h-20h UTC = 9h-16h ET (couvre NYSE 9h30-16h)
-    - cron: '*/10 13-20 * * 1-5'
+    # Toutes les 10 min, 7h-17h UTC = couvre LSE (8h-16h30 London) et Xetra (9h-17h30 CET)
+    - cron: '*/10 7-17 * * 1-5'
   workflow_dispatch:
 
 permissions:
