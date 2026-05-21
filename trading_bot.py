@@ -104,6 +104,7 @@ MAX_PER_CATEGORY = 2   # max positions simultanées par catégorie
 # ============================================================
 # ACTIFS
 # ============================================================
+# Note : _T212_TO_SYMBOL est construit APRÈS la définition de ASSETS (voir fin de cette section)
 
 ASSETS: dict[str, dict] = {
     "GLD":  {"t212": "GLD_US_EQ",  "category": "🪙 Matières premières", "stop": 0.03, "pct": 0.15, "params": "commodities"},
@@ -118,13 +119,16 @@ ASSETS: dict[str, dict] = {
     "IBIT": {"t212": "IBIT_US_EQ", "category": "₿ Crypto",              "stop": 0.07, "pct": 0.08, "params": "crypto"},
 }
 
+# Table inverse T212 ticker → symbole yfinance. Évite le parsing fragile par str.replace().
+_T212_TO_SYMBOL: dict[str, str] = {cfg["t212"]: sym for sym, cfg in ASSETS.items()}
+
 # ---- Paramètres techniques fixes ----
 EMA_SHORT  = 20
 EMA_LONG   = 50
 RSI_PERIOD = 14
 DATA_INTERVAL = "15m"
 DATA_PERIOD   = "5d"
-DAILY_PERIOD  = "60d"
+DAILY_PERIOD  = "3mo"   # ~65 jours ouvrés > 50 requis pour EMA50 daily ("60d" ne donne que ~43)
 
 # ---- Gestion du risque ----
 DAILY_LOSS_LIMIT_PCT    = float(os.getenv("DAILY_LOSS_LIMIT_PCT", "0.05"))
@@ -595,11 +599,14 @@ def get_all_positions() -> list[dict]:
         return []
     result = []
     for p in data:
+        t212_ticker = p.get("ticker", "")
+        symbol = _T212_TO_SYMBOL.get(t212_ticker, "")
+        if not symbol:
+            continue  # actif inconnu de notre univers, ignorer
         avg_price     = float(p.get("averagePrice", 0))
         current_price = float(p.get("currentPrice", avg_price))
         qty           = float(p.get("quantity", 0))
         plpc = ((current_price - avg_price) / avg_price) if avg_price else 0
-        symbol = p.get("ticker", "").replace("_US_EQ", "").replace("_EQ", "")
         result.append({
             "symbol":          symbol,
             "qty":             qty,
@@ -699,17 +706,20 @@ def _fetch_daily_trend(symbol: str) -> str:
 
 
 def _volume_ok(df: pd.DataFrame, vol_mult: float) -> bool:
-    """Volume dernière bougie clôturée > vol_mult × EMA20(volume). True si pas de données."""
+    """
+    Volume dernière bougie clôturée > vol_mult × EMA20(volume).
+    Retourne False si données absentes (ne pas masquer le manque de données en signal positif).
+    """
     try:
         volume = df["Volume"].squeeze().iloc[:-1]
         if volume.empty or volume.sum() == 0:
-            return True
+            return False  # données volume absentes → filtre échoue
         vol_ema = float(volume.ewm(span=20, adjust=False).mean().iloc[-1])
         if vol_ema == 0:
-            return True
+            return False
         return float(volume.iloc[-1]) >= vol_ema * vol_mult
     except Exception:
-        return True
+        return False  # erreur → filtre échoue prudemment
 
 
 def calc_ema(series: pd.Series, period: int) -> pd.Series:
@@ -721,7 +731,11 @@ def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     gain  = delta.clip(lower=0).ewm(alpha=1 / period, min_periods=period).mean()
     loss  = (-delta.clip(upper=0)).ewm(alpha=1 / period, min_periods=period).mean()
     rs    = gain / loss.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
+    rsi   = 100 - (100 / (1 + rs))
+    if rsi.isna().any():
+        logger.warning("RSI contient des NaN (série plate ou données insuffisantes) — remplacé par 50")
+        rsi = rsi.fillna(50.0)
+    return rsi
 
 
 def calc_macd(series: pd.Series, fast: int, slow: int, sig: int) -> tuple[pd.Series, pd.Series]:
@@ -1049,9 +1063,16 @@ def should_buy(signals: dict, has_position: bool) -> bool:
     - RSI sous seuil catégorie (48 / 45 / 55)
     - MACD croisement haussier sur bougie clôturée
     - Tendance journalière NON baissière (EMA50 daily — gate dur)
+    Note : daily_trend="unknown" (yfinance HS) laisse passer mais logue un avertissement.
     """
     if has_position:
         return False
+    if signals["daily_trend"] == "unknown":
+        logger.warning(
+            "%s : daily_trend=unknown (yfinance HS ou données insuffisantes) — "
+            "achat autorisé mais non confirmé sur le timeframe journalier",
+            signals["symbol"],
+        )
     return (
         signals["trend_bullish"]
         and signals["rsi"] < signals["rsi_buy"]
@@ -1303,7 +1324,7 @@ def _execute_buy(
                 stats["live_start_date"] = datetime.now().isoformat()
                 save_json(RISK_STATS_FILE, stats)
 
-        cal_note = f" [calibration 50%]" if cal < 1.0 else ""
+        cal_note = f" [calibration {cal*100:.0f}%]" if cal < 1.0 else ""
         log_decision(symbol, "ACHAT_ORDRE",
             f"{amount:.2f}€ prix={signals['price']:.4f}${cal_note}", signals)
         init_position_meta(symbol, signals["price"])

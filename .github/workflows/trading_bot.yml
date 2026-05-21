@@ -41,7 +41,7 @@ jobs:
           T212_API_KEY: ${{ secrets.T212_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-          T212_DEMO: 'true'
+          T212_DEMO: ${{ secrets.T212_DEMO || 'true' }}
           STOP_LOSS_PCT: '0.03'
           MAX_POSITION_PCT: '0.20'
           DAILY_LOSS_LIMIT_PCT: '0.05'
@@ -53,6 +53,12 @@ jobs:
           git config user.email "trading-bot@users.noreply.github.com"
           git config user.name "InvestBot"
           git pull --rebase origin claude/telegram-investbot-zJXWJ
+          # Valider les JSON avant commit — ne pas persister un état corrompu
+          for f in trades.json daily_pnl.json disabled_assets.json positions_meta.json risk_stats.json bot_control.json; do
+            if [ -f "$f" ]; then
+              python -m json.tool "$f" > /dev/null 2>&1 || { echo "ERREUR: $f est corrompu, commit annulé"; exit 1; }
+            fi
+          done
           git add trades.json daily_pnl.json disabled_assets.json positions_meta.json risk_stats.json bot_control.json decisions.log 2>/dev/null || true
           git diff --staged --quiet || git commit -m "bot: mise à jour état [skip ci]"
           git push origin claude/telegram-investbot-zJXWJ
