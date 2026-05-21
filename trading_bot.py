@@ -34,16 +34,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# User-Agent navigateur pour contourner le blocage Yahoo Finance sur les IPs cloud
-import requests as _requests_module
-_yf_session = _requests_module.Session()
-_yf_session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-})
-
 # ---- Clés API ----
 T212_API_KEY_ID: str = os.getenv("T212_API_KEY_ID", "")
 T212_API_KEY: str = os.getenv("T212_API_KEY", "")
@@ -693,7 +683,7 @@ def is_market_open() -> bool:
 
 def fetch_ohlcv(symbol: str) -> Optional[pd.DataFrame]:
     try:
-        ticker = yf.Ticker(symbol, session=_yf_session)
+        ticker = yf.Ticker(symbol)
         df = ticker.history(period=DATA_PERIOD, interval=DATA_INTERVAL, auto_adjust=True)
         if df.empty or len(df) < EMA_LONG + 1:
             logger.warning("%s : données insuffisantes (%d barres)", symbol, len(df))
@@ -707,7 +697,7 @@ def fetch_ohlcv(symbol: str) -> Optional[pd.DataFrame]:
 def _fetch_daily_trend(symbol: str) -> str:
     """EMA50 journalière — filtre de tendance de fond. Retourne 'bullish'/'bearish'/'unknown'."""
     try:
-        ticker = yf.Ticker(symbol, session=_yf_session)
+        ticker = yf.Ticker(symbol)
         df = ticker.history(period=DAILY_PERIOD, interval="1d", auto_adjust=True)
         if df is None or df.empty or len(df) < 50:
             return "unknown"
@@ -969,7 +959,7 @@ def _fetch_historical_returns(symbols: list[str], days: int = 25) -> dict[str, p
 
     def _one(sym: str) -> Optional[pd.Series]:
         try:
-            df = yf.Ticker(sym, session=_yf_session).history(
+            df = yf.Ticker(sym).history(
                 period=f"{days + 5}d", interval="1d", auto_adjust=True)
             if df is None or df.empty or len(df) < days:
                 return None
