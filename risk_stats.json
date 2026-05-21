@@ -1,4 +1,9 @@
 {
   "win_streak": 0,
-  "last_date": null
+  "last_date": null,
+  "current_week_pnl": 0.0,
+  "weekly_results": [],
+  "profitable_weeks": 0,
+  "peak_portfolio_value": null,
+  "live_start_date": null
 }
