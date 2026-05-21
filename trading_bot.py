@@ -40,7 +40,8 @@ T212_API_KEY: str = os.getenv("T212_API_KEY", "")
 T212_DEMO: bool = os.getenv("T212_DEMO", "true").lower() == "true"
 TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID: str = os.getenv("CHAT_ID", "")
-DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
+DEBUG: bool      = os.getenv("DEBUG", "false").lower() == "true"
+TEST_TRADE: bool = os.getenv("TEST_TRADE", "false").lower() == "true"
 
 T212_BASE = "https://demo.trading212.com" if T212_DEMO else "https://live.trading212.com"
 
@@ -1076,7 +1077,7 @@ def calculate_portfolio_correlation(
 # SECTION 7 — STRATÉGIE & GESTION DU RISQUE
 # ============================================================
 
-def should_buy(signals: dict, has_position: bool) -> bool:
+def should_buy(signals: dict, has_position: bool, force: bool = False) -> bool:
     """
     Conditions d'achat (toutes requises) :
     - EMA20 > EMA50 (tendance 15min haussière)
@@ -1085,6 +1086,8 @@ def should_buy(signals: dict, has_position: bool) -> bool:
     - Tendance journalière NON baissière (EMA50 daily — gate dur)
     Note : daily_trend="unknown" (yfinance HS) laisse passer mais logue un avertissement.
     """
+    if force:
+        return True
     if has_position:
         return False
     if signals["daily_trend"] == "unknown":
@@ -1303,10 +1306,13 @@ def _execute_buy(
             logger.info("%s : achat bloqué — limite capital live %.0f€", symbol, live_limit)
             return
 
-    cal    = _calibration_factor()
-    amount = calculate_amount_atr(
-        symbol, buying_power, portfolio_value, signals["atr"], signals["price"], cal=cal
-    )
+    if TEST_TRADE:
+        amount = 1.0  # montant forcé pour test uniquement
+    else:
+        cal    = _calibration_factor()
+        amount = calculate_amount_atr(
+            symbol, buying_power, portfolio_value, signals["atr"], signals["price"], cal=cal
+        )
     if place_buy_order(symbol, amount, signals["price"]):
         qty_approx  = amount / signals["price"]
         daily_emoji = {"bullish": "🌞", "bearish": "🌧️", "unknown": "❓"}.get(
@@ -1474,6 +1480,17 @@ def run_strategy() -> None:
 
     active_symbols = [sym for sym in ASSETS if not is_asset_disabled(sym)]
     all_signals    = _prefetch_signals(active_symbols)
+
+    # ── Mode TEST_TRADE : forcer un achat de 1€ sur le premier actif sans position ──
+    if TEST_TRADE:
+        test_sym = next((s for s in active_symbols if s not in positions_map), None)
+        if test_sym and all_signals.get(test_sym):
+            logger.info("TEST_TRADE activé — achat forcé 1€ sur %s", test_sym)
+            _execute_buy(test_sym, all_signals[test_sym], buying_power,
+                         portfolio_value, invested, positions_map, mode)
+        else:
+            logger.warning("TEST_TRADE : aucun actif disponible sans position")
+        return
 
     # Traiter d'abord les positions ouvertes (stop-loss / ventes),
     # puis les achats potentiels triés par confluence décroissante
