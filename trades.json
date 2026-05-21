@@ -1,1 +1,14 @@
-[]
+[
+  {
+    "symbol": "PHAU",
+    "side": "BUY",
+    "category": "🪙 Matières premières",
+    "price": 418.32000732421875,
+    "amount_eur": 2.0,
+    "atr": 0.6864532136719088,
+    "confluence_score": 2,
+    "daily_trend": "bearish",
+    "calibration_factor": 1.0,
+    "timestamp": "2026-05-21T19:32:32.507910"
+  }
+]
