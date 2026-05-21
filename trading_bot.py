@@ -97,12 +97,12 @@ SIZING_PARAMS: dict[str, dict] = {
 # Paires mutuellement exclusives : impossible de détenir les deux simultanément
 # PHAU+PHAG : or+argent, corrélation historique > 0.80
 # EQQQ+XNAS : même sous-jacent Nasdaq-100, doublon de risque
-# BTIC+ETHE : crypto BTC+ETH, corrélation élevée
+# BTCE+ETHE : crypto BTC+ETH, corrélation élevée
 
 CORR_EXCLUSIONS: list[frozenset] = [
     frozenset({"PHAU", "PHAG"}),
     frozenset({"EQQQ", "XNAS"}),
-    frozenset({"BTIC", "ETHE"}),
+    frozenset({"BTCE", "ETHE"}),
 ]
 MAX_PER_CATEGORY = 2   # max positions simultanées par catégorie
 
@@ -123,7 +123,7 @@ ASSETS: dict[str, dict] = {
     "IWDA": {"t212": "IWDAl_EQ", "yf": "IWDA.L", "category": "📈 Actions",            "stop": 0.03, "pct": 0.12, "params": "equity"},
     "XNAS": {"t212": "XNASl_EQ", "yf": "XNAS.L", "category": "📈 Actions",            "stop": 0.04, "pct": 0.10, "params": "equity"},
     # Crypto — ETPs physiques UCITS
-    "BTIC": {"t212": "BTICd_EQ", "yf": "BTIC.DE", "category": "₿ Crypto",             "stop": 0.07, "pct": 0.08, "params": "crypto"},
+    "BTCE": {"t212": "BTCEd_EQ", "yf": "BTCE.DE", "category": "₿ Crypto",             "stop": 0.07, "pct": 0.08, "params": "crypto"},
     "ETHE": {"t212": "ETHPl_EQ", "yf": "ETHP.L",  "category": "₿ Crypto",             "stop": 0.08, "pct": 0.08, "params": "crypto"},
 }
 
@@ -948,7 +948,7 @@ def check_correlation_allowed(symbol: str, positions_map: dict) -> tuple[bool, s
     Retourne (autorisé, raison_si_refus).
 
     Règles :
-    1. Paires mutuellement exclusives (PHAU+PHAG, EQQQ+XNAS, BTIC+ETHE)
+    1. Paires mutuellement exclusives (PHAU+PHAG, EQQQ+XNAS, BTCE+ETHE)
     2. Max MAX_PER_CATEGORY positions simultanées par catégorie
     """
     open_symbols    = {sym for sym in ASSETS if sym in positions_map}
@@ -1319,7 +1319,7 @@ def _execute_buy(
             return
 
     if TEST_TRADE:
-        amount = 1.0  # montant forcé pour test uniquement
+        amount = 2.0  # montant forcé pour test — 2€ pour dépasser la quantité minimale T212
     else:
         cal    = _calibration_factor()
         amount = calculate_amount_atr(
@@ -1497,7 +1497,7 @@ def run_strategy() -> None:
     if TEST_TRADE:
         test_sym = next((s for s in active_symbols if s not in positions_map), None)
         if test_sym and all_signals.get(test_sym):
-            logger.info("TEST_TRADE activé — achat forcé 1€ sur %s", test_sym)
+            logger.info("TEST_TRADE activé — achat forcé 2€ sur %s", test_sym)
             _execute_buy(test_sym, all_signals[test_sym], buying_power,
                          portfolio_value, invested, positions_map, mode)
         else:
@@ -1651,7 +1651,7 @@ def main() -> None:
         + "\n".join(f"{cat} : {', '.join(syms)}" for cat, syms in categories.items())
         + f"\n\nSizing ATR | Trailing stop +{TRAILING_ACTIVATION_PCT*100:.0f}% | "
         f"Max {MAX_OPEN_POSITIONS} positions\n"
-        f"Corrélation : PHAU≠PHAG, EQQQ≠XNAS, BTIC≠ETHE | Max {MAX_PER_CATEGORY}/catégorie\n\n"
+        f"Corrélation : PHAU≠PHAG, EQQQ≠XNAS, BTCE≠ETHE | Max {MAX_PER_CATEGORY}/catégorie\n\n"
         f"💼 Portfolio : <b>{account.get('portfolio_value', 0):.2f} €</b>\n"
         f"💵 Disponible : <b>{account.get('buying_power', 0):.2f} €</b>"
     )
