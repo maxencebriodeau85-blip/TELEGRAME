@@ -598,21 +598,39 @@ def check_instrument(t212_ticker: str) -> None:
 
 
 def diagnose_t212_account() -> None:
-    """Diagnostic complet : type de compte + premiers instruments disponibles."""
-    info = t212_get("/api/v0/equity/account/info")
-    if info is _API_ERROR or not info:
-        logger.warning("DIAG T212 : impossible de lire account/info")
-    else:
-        logger.info("DIAG T212 account/info : %s", info)
-
-    instruments = t212_get("/api/v0/equity/metadata/instruments")
-    if instruments is _API_ERROR or not instruments:
-        logger.warning("DIAG T212 : impossible de lire metadata/instruments")
-    else:
-        sample = instruments[:10] if isinstance(instruments, list) else list(instruments.values())[:10]
-        for inst in sample:
-            logger.info("DIAG T212 instrument : ticker=%s name=%s",
-                        inst.get("ticker"), inst.get("name", inst.get("shortName", "?")))
+    """Vérifie les tickers UCITS européens candidats pour remplacer les ETFs US."""
+    # Candidats UCITS européens pour remplacer les ETFs US bloqués par PRIIPs
+    candidates = [
+        # Or physique
+        ("PHAUl_EQ",  "WisdomTree Physical Gold (LSE)"),
+        ("SGLDl_EQ",  "iShares Physical Gold (LSE)"),
+        ("IGLNl_EQ",  "iShares Physical Gold UCITS (LSE)"),
+        # Argent physique
+        ("PHAGl_EQ",  "WisdomTree Physical Silver (LSE)"),
+        # Pétrole
+        ("CRUDl_EQ",  "WisdomTree Brent Crude (LSE)"),
+        ("OILBl_EQ",  "iShares Oil Producers (LSE)"),
+        # Gaz naturel
+        ("NGASl_EQ",  "WisdomTree Natural Gas (LSE)"),
+        # Actions / indices
+        ("XNASl_EQ",  "Xtrackers NASDAQ 100 (LSE)"),
+        ("CSPXl_EQ",  "iShares Core S&P 500 (LSE)"),
+        ("IWDAl_EQ",  "iShares Core MSCI World (LSE)"),
+        ("VWRLl_EQ",  "Vanguard FTSE All-World (LSE)"),
+        # Crypto
+        ("BTCEl_EQ",  "ETC Group Physical Bitcoin (LSE)"),
+        ("BTCEd_EQ",  "ETC Group Physical Bitcoin (Xetra)"),
+        ("BTCWl_EQ",  "WisdomTree Physical Bitcoin (LSE)"),
+        ("ETHEl_EQ",  "ETC Group Physical Ethereum (LSE)"),
+        ("ETHEd_EQ",  "ETC Group Physical Ethereum (Xetra)"),
+    ]
+    logger.info("DIAG T212 — recherche des tickers UCITS disponibles :")
+    for ticker, label in candidates:
+        data = t212_get(f"/api/v0/equity/metadata/instruments/{ticker}")
+        if data and data is not _API_ERROR:
+            logger.info("  ✓ DISPO  %s  (%s)  minQty=%s", ticker, label, data.get("minTradeQuantity"))
+        else:
+            logger.info("  ✗ ABSENT %s  (%s)", ticker, label)
 
 
 def get_account() -> dict:
