@@ -1,5 +1,5 @@
 python-telegram-bot==20.7
-yfinance==0.2.36
+yfinance>=0.2.54
 anthropic==0.25.0
 APScheduler==3.10.4
 python-dotenv==1.0.1

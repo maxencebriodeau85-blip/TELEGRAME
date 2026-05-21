@@ -693,10 +693,8 @@ def is_market_open() -> bool:
 
 def fetch_ohlcv(symbol: str) -> Optional[pd.DataFrame]:
     try:
-        df = yf.download(
-            symbol, period=DATA_PERIOD, interval=DATA_INTERVAL,
-            progress=False, auto_adjust=True, session=_yf_session,
-        )
+        ticker = yf.Ticker(symbol, session=_yf_session)
+        df = ticker.history(period=DATA_PERIOD, interval=DATA_INTERVAL, auto_adjust=True)
         if df.empty or len(df) < EMA_LONG + 1:
             logger.warning("%s : données insuffisantes (%d barres)", symbol, len(df))
             return None
@@ -709,8 +707,8 @@ def fetch_ohlcv(symbol: str) -> Optional[pd.DataFrame]:
 def _fetch_daily_trend(symbol: str) -> str:
     """EMA50 journalière — filtre de tendance de fond. Retourne 'bullish'/'bearish'/'unknown'."""
     try:
-        df = yf.download(symbol, period=DAILY_PERIOD, interval="1d",
-                         progress=False, auto_adjust=True, session=_yf_session)
+        ticker = yf.Ticker(symbol, session=_yf_session)
+        df = ticker.history(period=DAILY_PERIOD, interval="1d", auto_adjust=True)
         if df is None or df.empty or len(df) < 50:
             return "unknown"
         close = df["Close"].squeeze()
@@ -971,8 +969,8 @@ def _fetch_historical_returns(symbols: list[str], days: int = 25) -> dict[str, p
 
     def _one(sym: str) -> Optional[pd.Series]:
         try:
-            df = yf.download(sym, period=f"{days + 5}d", interval="1d",
-                             progress=False, auto_adjust=True, session=_yf_session)
+            df = yf.Ticker(sym, session=_yf_session).history(
+                period=f"{days + 5}d", interval="1d", auto_adjust=True)
             if df is None or df.empty or len(df) < days:
                 return None
             return df["Close"].squeeze().pct_change().dropna().tail(days)
