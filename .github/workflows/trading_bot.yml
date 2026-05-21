@@ -62,5 +62,5 @@ jobs:
           # (git pull --rebase échoue si des fichiers sont modifiés mais pas stagés)
           git add trades.json daily_pnl.json disabled_assets.json positions_meta.json risk_stats.json bot_control.json decisions.log 2>/dev/null || true
           git diff --staged --quiet || git commit -m "bot: mise à jour état [skip ci]"
-          git pull --rebase origin claude/telegram-investbot-zJXWJ
+          git pull --rebase --autostash origin claude/telegram-investbot-zJXWJ
           git push origin claude/telegram-investbot-zJXWJ
