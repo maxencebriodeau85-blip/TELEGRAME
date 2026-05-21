@@ -1,7 +1,5 @@
 trading:
-  # Passer à LIVE quand tous les points de la checklist sont validés
-  # Changer aussi T212_DEMO à 'false' dans .github/workflows/trading_bot.yml
-  mode: DEMO                 # DEMO | LIVE
+  mode: LIVE                 # DEMO | LIVE
   live_capital_limit: 500    # montant max total engageable en € (mode LIVE uniquement)
   calibration_days: 30       # premiers N jours live = sizing 50%
 
