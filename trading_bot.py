@@ -352,13 +352,15 @@ def send_telegram(text: str) -> None:
 # ============================================================
 
 _config_cache: dict = {}
+_config_loaded: bool = False
 
 
 def load_config() -> dict:
     """Charge config.yaml une seule fois par run (cache module-level)."""
-    global _config_cache
-    if _config_cache:
+    global _config_cache, _config_loaded
+    if _config_loaded:
         return _config_cache
+    _config_loaded = True
     if CONFIG_FILE.exists():
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -383,7 +385,7 @@ def save_bot_control(ctrl: dict) -> None:
 
 
 def log_decision(symbol: str, action: str, reason: str, signals: Optional[dict] = None) -> None:
-    """Écrit chaque décision de trading dans decisions.log pour audit post-trade."""
+    """Écrit chaque décision dans decisions.log. Cap à 5 000 lignes si le fichier dépasse 1 Mo."""
     now = datetime.now(ZoneInfo("America/New_York")).isoformat()
     sig_str = ""
     if signals:
@@ -396,6 +398,11 @@ def log_decision(symbol: str, action: str, reason: str, signals: Optional[dict] 
         )
     line = f"{now} | {symbol:<6} | {action:<24} | {reason}{sig_str}\n"
     try:
+        if DECISIONS_LOG_FILE.exists() and DECISIONS_LOG_FILE.stat().st_size > 1_000_000:
+            with open(DECISIONS_LOG_FILE, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            with open(DECISIONS_LOG_FILE, "w", encoding="utf-8") as f:
+                f.writelines(lines[-5000:])
         with open(DECISIONS_LOG_FILE, "a", encoding="utf-8") as f:
             f.write(line)
     except Exception as e:
@@ -424,9 +431,14 @@ def poll_telegram_commands() -> None:
             msg       = update.get("message", {})
             chat_id   = str(msg.get("chat", {}).get("id", ""))
             text      = msg.get("text", "").strip()
+            msg_date  = msg.get("date", 0)  # Unix timestamp
 
             ctrl["last_telegram_update_id"] = max(ctrl.get("last_telegram_update_id", 0), update_id)
             changed = True
+
+            # Ignorer les messages plus vieux de 10 min (évite de rejouer les commandes historiques)
+            if time.time() - msg_date > 600:
+                continue
 
             if chat_id != str(CHAT_ID):
                 continue
@@ -833,6 +845,7 @@ def calculate_amount_atr(
     portfolio_value: float,
     atr: float,
     current_price: float,
+    cal: float = 1.0,
 ) -> float:
     """
     Sizing dynamique basé sur l'ATR.
@@ -841,10 +854,9 @@ def calculate_amount_atr(
     Plafond  : min(résultat, portfolio × max_pct, buying_power)
 
     Si ATR = 0 ou prix = 0 → fallback sur le % fixe de l'actif.
+    `cal` : facteur de calibration (0.5 pendant phase live initiale, 1.0 sinon).
     """
     sizing = SIZING_PARAMS[ASSETS[symbol]["params"]]
-
-    cal = _calibration_factor()  # 0.5 pendant phase calibration live, 1.0 sinon
 
     if atr <= 0 or current_price <= 0:
         return round(min(buying_power * ASSETS[symbol]["pct"] * cal, buying_power), 2)
@@ -1197,6 +1209,7 @@ def _execute_stop_loss(symbol: str, signals: dict, position: dict, mode: str) ->
             "price": signals["price"], "pl": pl,
             "timestamp": datetime.now().isoformat(),
         })
+        logger.info("STOP-LOSS %s — PL=%.2f€", symbol, pl)
 
 
 def _execute_sell(symbol: str, signals: dict, position: dict, mode: str) -> None:
@@ -1233,6 +1246,7 @@ def _execute_sell(symbol: str, signals: dict, position: dict, mode: str) -> None
 def _execute_buy(
     symbol: str, signals: dict,
     buying_power: float, portfolio_value: float,
+    invested: float,
     positions_map: dict, mode: str,
 ) -> None:
     asset_cfg = ASSETS[symbol]
@@ -1242,19 +1256,16 @@ def _execute_buy(
     if not T212_DEMO:
         cfg        = load_config()
         live_limit = cfg.get("trading", {}).get("live_capital_limit", 500)
-        account_now = get_account()
-        if account_now:
-            invested = account_now.get("invested", 0)
-            if invested >= live_limit:
-                log_decision(symbol, "ACHAT_REJETÉ_LIMITE",
-                    f"capital live {live_limit:.0f}€ atteint (investi={invested:.2f}€)", signals)
-                logger.info("%s : achat bloqué — limite capital live %.0f€", symbol, live_limit)
-                return
+        if invested >= live_limit:
+            log_decision(symbol, "ACHAT_REJETÉ_LIMITE",
+                f"capital live {live_limit:.0f}€ atteint (investi={invested:.2f}€)", signals)
+            logger.info("%s : achat bloqué — limite capital live %.0f€", symbol, live_limit)
+            return
 
+    cal    = _calibration_factor()
     amount = calculate_amount_atr(
-        symbol, buying_power, portfolio_value, signals["atr"], signals["price"]
+        symbol, buying_power, portfolio_value, signals["atr"], signals["price"], cal=cal
     )
-    cal = _calibration_factor()
     if place_buy_order(symbol, amount, signals["price"]):
         qty_approx  = amount / signals["price"]
         daily_emoji = {"bullish": "🌞", "bearish": "🌧️", "unknown": "❓"}.get(
@@ -1317,6 +1328,7 @@ def _handle_asset(
     positions_map: dict,
     buying_power: float,
     portfolio_value: float,
+    invested: float,
     mode: str,
     open_count: int,
 ) -> int:
@@ -1369,7 +1381,7 @@ def _handle_asset(
                 logger.info("%s : achat bloqué — %s", symbol, reason)
                 return 0
 
-            _execute_buy(symbol, signals, buying_power, portfolio_value, positions_map, mode)
+            _execute_buy(symbol, signals, buying_power, portfolio_value, invested, positions_map, mode)
             return 1
 
     logger.debug(
@@ -1412,6 +1424,7 @@ def run_strategy() -> None:
 
     buying_power    = account["buying_power"]
     portfolio_value = account["portfolio_value"]
+    invested        = account.get("invested", 0)
     mode            = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
 
     raw_positions = get_all_positions()
@@ -1436,7 +1449,7 @@ def run_strategy() -> None:
             continue
         delta = _handle_asset(
             symbol, signals, positions_map.get(symbol), positions_map,
-            buying_power, portfolio_value, mode, open_count,
+            buying_power, portfolio_value, invested, mode, open_count,
         )
         open_count += delta
         # Mettre à jour positions_map si un achat vient d'être effectué
