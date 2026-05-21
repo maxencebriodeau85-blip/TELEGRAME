@@ -583,54 +583,46 @@ def t212_post(endpoint: str, body: dict) -> object:
 
 
 def check_instrument(t212_ticker: str) -> None:
-    """Log les infos de l'instrument pour diagnostiquer les 400 sur les orders."""
-    data = t212_get(f"/api/v0/equity/metadata/instruments/{t212_ticker}")
-    if data is _API_ERROR:
-        logger.warning("check_instrument %s : T212 inaccessible", t212_ticker)
-    elif data is None:
-        logger.warning("check_instrument %s : instrument introuvable (404)", t212_ticker)
-    else:
-        logger.info("check_instrument %s : minTradeQuantity=%s maxTradeQuantity=%s currencyCode=%s",
-                    t212_ticker,
-                    data.get("minTradeQuantity"),
-                    data.get("maxTradeQuantity"),
-                    data.get("currencyCode"))
+    """Log les infos de l'instrument depuis la liste complète."""
+    instruments = t212_get("/api/v0/equity/metadata/instruments")
+    if instruments is _API_ERROR or not isinstance(instruments, list):
+        logger.warning("check_instrument : impossible de lire la liste")
+        return
+    for inst in instruments:
+        if inst.get("ticker") == t212_ticker:
+            logger.info("check_instrument %s : minQty=%s maxQty=%s currency=%s",
+                        t212_ticker, inst.get("minTradeQuantity"),
+                        inst.get("maxTradeQuantity"), inst.get("currencyCode"))
+            return
+    logger.warning("check_instrument %s : introuvable dans la liste", t212_ticker)
 
 
 def diagnose_t212_account() -> None:
-    """Vérifie les tickers UCITS européens candidats pour remplacer les ETFs US."""
-    # Candidats UCITS européens pour remplacer les ETFs US bloqués par PRIIPs
-    candidates = [
-        # Or physique
-        ("PHAUl_EQ",  "WisdomTree Physical Gold (LSE)"),
-        ("SGLDl_EQ",  "iShares Physical Gold (LSE)"),
-        ("IGLNl_EQ",  "iShares Physical Gold UCITS (LSE)"),
-        # Argent physique
-        ("PHAGl_EQ",  "WisdomTree Physical Silver (LSE)"),
-        # Pétrole
-        ("CRUDl_EQ",  "WisdomTree Brent Crude (LSE)"),
-        ("OILBl_EQ",  "iShares Oil Producers (LSE)"),
-        # Gaz naturel
-        ("NGASl_EQ",  "WisdomTree Natural Gas (LSE)"),
-        # Actions / indices
-        ("XNASl_EQ",  "Xtrackers NASDAQ 100 (LSE)"),
-        ("CSPXl_EQ",  "iShares Core S&P 500 (LSE)"),
-        ("IWDAl_EQ",  "iShares Core MSCI World (LSE)"),
-        ("VWRLl_EQ",  "Vanguard FTSE All-World (LSE)"),
-        # Crypto
-        ("BTCEl_EQ",  "ETC Group Physical Bitcoin (LSE)"),
-        ("BTCEd_EQ",  "ETC Group Physical Bitcoin (Xetra)"),
-        ("BTCWl_EQ",  "WisdomTree Physical Bitcoin (LSE)"),
-        ("ETHEl_EQ",  "ETC Group Physical Ethereum (LSE)"),
-        ("ETHEd_EQ",  "ETC Group Physical Ethereum (Xetra)"),
-    ]
-    logger.info("DIAG T212 — recherche des tickers UCITS disponibles :")
-    for ticker, label in candidates:
-        data = t212_get(f"/api/v0/equity/metadata/instruments/{ticker}")
-        if data and data is not _API_ERROR:
-            logger.info("  ✓ DISPO  %s  (%s)  minQty=%s", ticker, label, data.get("minTradeQuantity"))
-        else:
-            logger.info("  ✗ ABSENT %s  (%s)", ticker, label)
+    """Charge la liste complète des instruments T212 et cherche les équivalents UCITS."""
+    instruments = t212_get("/api/v0/equity/metadata/instruments")
+    if instruments is _API_ERROR or not instruments:
+        logger.warning("DIAG T212 : impossible de lire metadata/instruments")
+        return
+    if not isinstance(instruments, list):
+        logger.warning("DIAG T212 : format inattendu (%s)", type(instruments))
+        return
+
+    logger.info("DIAG T212 — %d instruments disponibles au total", len(instruments))
+
+    # Mots-clés à rechercher dans name/shortName/ticker
+    keywords = ["gold", "silver", "crude", "brent", "oil", "gas", "bitcoin", "ethereum",
+                "nasdaq", "s&p", "s&p 500", "sp500", "world", "wisdomtree", "ishares",
+                "xtrackers", "invesco", "vanguard", "physical", "ucits"]
+
+    seen: set = set()
+    for inst in instruments:
+        ticker = inst.get("ticker", "")
+        name   = (inst.get("name") or inst.get("shortName") or "").lower()
+        if any(kw in name or kw in ticker.lower() for kw in keywords):
+            if ticker not in seen:
+                seen.add(ticker)
+                logger.info("DIAG MATCH  ticker=%-20s  name=%s",
+                            ticker, inst.get("name") or inst.get("shortName"))
 
 
 def get_account() -> dict:
