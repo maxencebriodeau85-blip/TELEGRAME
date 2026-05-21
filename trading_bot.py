@@ -562,6 +562,8 @@ def _t212_request(method: str, url: str, body: Optional[dict] = None) -> object:
                 logger.warning("T212 rate limit — retry %d", attempt + 1)
                 last_exc = "rate_limit"
                 continue
+            if not resp.ok:
+                logger.warning("T212 %s %s → %d : %s", method, url, resp.status_code, resp.text[:500])
             resp.raise_for_status()
             time.sleep(T212_RATE_SLEEP)
             return resp.json()
@@ -648,7 +650,7 @@ def place_buy_order(symbol: str, amount_eur: float, current_price: float) -> boo
         return False
     quantity = round(amount_eur / current_price, 6)
     result   = t212_post("/api/v0/equity/orders/market", {
-        "ticker": ASSETS[symbol]["t212"], "quantity": quantity,
+        "ticker": ASSETS[symbol]["t212"], "quantity": quantity, "timeValidity": "DAY",
     })
     if result is _API_ERROR:
         logger.error("ACHAT %s échoué : T212 inaccessible", symbol)
@@ -669,7 +671,7 @@ def close_position(symbol: str) -> bool:
     if not position:
         return True
     result = t212_post("/api/v0/equity/orders/market", {
-        "ticker": ASSETS[symbol]["t212"], "quantity": -position["qty"],
+        "ticker": ASSETS[symbol]["t212"], "quantity": -position["qty"], "timeValidity": "DAY",
     })
     if result is _API_ERROR:
         logger.error("VENTE %s échouée : T212 inaccessible", symbol)
