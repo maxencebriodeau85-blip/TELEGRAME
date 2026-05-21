@@ -36,6 +36,21 @@ jobs:
       - name: Installation des dépendances
         run: pip install -r requirements.txt
 
+      - name: Diagnostic API T212
+        env:
+          T212_API_KEY: ${{ secrets.T212_API_KEY }}
+          T212_API_KEY_ID: ${{ secrets.T212_API_KEY_ID }}
+        run: |
+          echo "=== Test CLÉ SECRÈTE (43 chars) ==="
+          curl -s -w "\nHTTP:%{http_code}" \
+            -H "Authorization: ${T212_API_KEY}" \
+            https://demo.trading212.com/api/v0/equity/account/cash
+          echo ""
+          echo "=== Test ID DE LA CLÉ ==="
+          curl -s -w "\nHTTP:%{http_code}" \
+            -H "Authorization: ${T212_API_KEY_ID}" \
+            https://demo.trading212.com/api/v0/equity/account/cash
+
       - name: Exécution de la stratégie
         env:
           T212_API_KEY: ${{ secrets.T212_API_KEY }}
