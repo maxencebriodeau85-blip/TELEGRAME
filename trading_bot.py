@@ -467,8 +467,23 @@ def poll_telegram_commands() -> None:
             elif cmd == "/resume":
                 ctrl["paused"] = False
                 ctrl["paused_at"] = None
-                send_telegram("▶️ <b>Bot repris</b> — prochaine analyse dans ≤ 20 min.")
+                send_telegram("▶️ <b>Bot repris</b> — prochaine analyse dans ≤ 5 min.")
                 logger.info("Bot repris via Telegram")
+            elif cmd == "/status":
+                mode = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
+                account = get_account()
+                positions = get_all_positions()
+                daily = load_daily_pnl()
+                bal = f"{account['portfolio_value']:.2f}€" if account else "N/A"
+                pnl = daily.get("pnl", 0.0)
+                paused_str = "⏸️ En pause" if ctrl.get("paused") else "▶️ Actif"
+                send_telegram(
+                    f"📊 <b>Status Bot {mode}</b>\n"
+                    f"État : {paused_str}\n"
+                    f"Portefeuille : {bal}\n"
+                    f"P&L jour : {pnl:+.2f}€\n"
+                    f"Positions : {len(positions)}/{len(ASSETS)}"
+                )
 
         if changed:
             save_bot_control(ctrl)

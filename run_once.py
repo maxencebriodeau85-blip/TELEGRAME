@@ -13,11 +13,17 @@ from trading_bot import (
     POSITIONS_META_FILE,
     RISK_STATS_FILE,
     BOT_CONTROL_FILE,
+    ASSETS,
+    T212_DEMO,
     load_daily_pnl,
     save_json,
     run_strategy,
     daily_summary,
     is_market_open,
+    send_telegram,
+    get_account,
+    get_all_positions,
+    poll_telegram_commands,
 )
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -54,12 +60,26 @@ if __name__ == "__main__":
 
     now_ny = datetime.now(ZoneInfo("America/New_York"))
 
+    # Traiter les commandes Telegram (/pause, /resume, /status) à chaque run
+    poll_telegram_commands()
+
     if not is_market_open():
         logger.info("Marché fermé — analyse ignorée")
     elif now_ny.hour == 16 and 5 <= now_ny.minute < 25:
         # Résumé journalier — envoyé une seule fois (fenêtre 16h05–16h24 NY)
         logger.info("Envoi du résumé journalier")
         daily_summary()
+    elif now_ny.hour == 9 and 30 <= now_ny.minute < 50:
+        # Message d'ouverture — envoyé une seule fois à l'ouverture du marché
+        mode = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
+        account = get_account()
+        bal = f"{account['portfolio_value']:.2f}€" if account else "N/A"
+        positions = get_all_positions()
+        send_telegram(
+            f"🟢 Marché ouvert — Bot actif {mode}\n"
+            f"Portefeuille : {bal} | Positions : {len(positions)}/{len(ASSETS)} actifs"
+        )
+        run_strategy()
     else:
         # Analyse normale — les trades/SL génèrent leurs propres messages Telegram
         run_strategy()
