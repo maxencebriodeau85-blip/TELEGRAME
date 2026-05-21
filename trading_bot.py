@@ -1318,6 +1318,7 @@ def _execute_buy(
             logger.info("%s : achat bloqué — limite capital live %.0f€", symbol, live_limit)
             return
 
+    cal = 1.0
     if TEST_TRADE:
         amount = 2.0  # montant forcé pour test — 2€ pour dépasser la quantité minimale T212
     else:
