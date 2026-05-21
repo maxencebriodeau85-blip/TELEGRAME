@@ -582,6 +582,21 @@ def t212_post(endpoint: str, body: dict) -> object:
     return _t212_request("POST", f"{T212_BASE}{endpoint}", body=body)
 
 
+def check_instrument(t212_ticker: str) -> None:
+    """Log les infos de l'instrument pour diagnostiquer les 400 sur les orders."""
+    data = t212_get(f"/api/v0/equity/metadata/instruments/{t212_ticker}")
+    if data is _API_ERROR:
+        logger.warning("check_instrument %s : T212 inaccessible", t212_ticker)
+    elif data is None:
+        logger.warning("check_instrument %s : instrument introuvable (404)", t212_ticker)
+    else:
+        logger.info("check_instrument %s : minTradeQuantity=%s maxTradeQuantity=%s currencyCode=%s",
+                    t212_ticker,
+                    data.get("minTradeQuantity"),
+                    data.get("maxTradeQuantity"),
+                    data.get("currencyCode"))
+
+
 def get_account() -> dict:
     data = t212_get("/api/v0/equity/account/cash")
     if data is _API_ERROR or not data:
@@ -649,8 +664,11 @@ def place_buy_order(symbol: str, amount_eur: float, current_price: float) -> boo
         logger.warning("%s montant trop faible : %.2f€", symbol, amount_eur)
         return False
     quantity = round(amount_eur / current_price, 6)
+    t212_ticker = ASSETS[symbol]["t212"]
+    check_instrument(t212_ticker)
+    logger.info("ACHAT %s : body → ticker=%s quantity=%s", symbol, t212_ticker, quantity)
     result   = t212_post("/api/v0/equity/orders/market", {
-        "ticker": ASSETS[symbol]["t212"], "quantity": quantity, "timeValidity": "DAY",
+        "ticker": t212_ticker, "quantity": quantity,
     })
     if result is _API_ERROR:
         logger.error("ACHAT %s échoué : T212 inaccessible", symbol)
@@ -671,7 +689,7 @@ def close_position(symbol: str) -> bool:
     if not position:
         return True
     result = t212_post("/api/v0/equity/orders/market", {
-        "ticker": ASSETS[symbol]["t212"], "quantity": -position["qty"], "timeValidity": "DAY",
+        "ticker": ASSETS[symbol]["t212"], "quantity": -position["qty"],
     })
     if result is _API_ERROR:
         logger.error("VENTE %s échouée : T212 inaccessible", symbol)
