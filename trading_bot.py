@@ -3,7 +3,7 @@
 """
 TradingBot COMPLET — Trading 212 Invest
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Actifs    : Matières premières + Forex ETF + Crypto ETF (10 actifs)
+Actifs    : Matières premières + Actions (ETFs UCITS) + Crypto ETPs (10 actifs)
 Stratégie : EMA 20/50 + RSI 14 + MACD adapté par catégorie, bougies 15min CLÔTURÉES
 Risque    : ATR sizing, trailing stop, circuit breaker -5%/jour, corrélations inter-actifs
 Broker    : Trading 212 Invest (fractions, 0 commission)
@@ -59,9 +59,9 @@ SIGNAL_PARAMS: dict[str, dict] = {
         "macd_fast": 12, "macd_slow": 26, "macd_sig": 9,
         "vol_mult": 1.3, "sell_min": 2,
     },
-    "forex": {
-        "rsi_buy": 45, "rsi_sell": 62,
-        "macd_fast": 24, "macd_slow": 52, "macd_sig": 18,
+    "equity": {
+        "rsi_buy": 50, "rsi_sell": 68,
+        "macd_fast": 12, "macd_slow": 26, "macd_sig": 9,
         "vol_mult": 1.2, "sell_min": 2,
     },
     "crypto": {
@@ -86,7 +86,7 @@ SIGNAL_PARAMS: dict[str, dict] = {
 
 SIZING_PARAMS: dict[str, dict] = {
     "commodities": {"risk_pct": 0.010, "atr_period": 14, "atr_mult": 2.0, "max_pct": 0.15},
-    "forex":       {"risk_pct": 0.005, "atr_period": 14, "atr_mult": 1.5, "max_pct": 0.15},
+    "equity":      {"risk_pct": 0.008, "atr_period": 14, "atr_mult": 2.0, "max_pct": 0.15},
     "crypto":      {"risk_pct": 0.015, "atr_period": 14, "atr_mult": 2.5, "max_pct": 0.08},
 }
 
@@ -95,12 +95,14 @@ SIZING_PARAMS: dict[str, dict] = {
 # ============================================================
 #
 # Paires mutuellement exclusives : impossible de détenir les deux simultanément
-# GLD+SLV : corrélation historique > 0.85 (deux métaux précieux)
-# BITO+IBIT : même sous-jacent (Bitcoin), doublon de risque
+# PHAU+PHAG : or+argent, corrélation historique > 0.80
+# EQQQ+XNAS : même sous-jacent Nasdaq-100, doublon de risque
+# BTIC+ETHE : crypto BTC+ETH, corrélation élevée
 
 CORR_EXCLUSIONS: list[frozenset] = [
-    frozenset({"GLD", "SLV"}),
-    frozenset({"BITO", "IBIT"}),
+    frozenset({"PHAU", "PHAG"}),
+    frozenset({"EQQQ", "XNAS"}),
+    frozenset({"BTIC", "ETHE"}),
 ]
 MAX_PER_CATEGORY = 2   # max positions simultanées par catégorie
 
@@ -110,16 +112,19 @@ MAX_PER_CATEGORY = 2   # max positions simultanées par catégorie
 # Note : _T212_TO_SYMBOL est construit APRÈS la définition de ASSETS (voir fin de cette section)
 
 ASSETS: dict[str, dict] = {
-    "GLD":  {"t212": "GLD_US_EQ",  "category": "🪙 Matières premières", "stop": 0.03, "pct": 0.15, "params": "commodities"},
-    "SLV":  {"t212": "SLV_US_EQ",  "category": "🪙 Matières premières", "stop": 0.03, "pct": 0.15, "params": "commodities"},
-    "USO":  {"t212": "USO_US_EQ",  "category": "🪙 Matières premières", "stop": 0.04, "pct": 0.12, "params": "commodities"},
-    "UNG":  {"t212": "UNG_US_EQ",  "category": "🪙 Matières premières", "stop": 0.05, "pct": 0.10, "params": "commodities"},
-    "FXE":  {"t212": "FXE_US_EQ",  "category": "💱 Forex",              "stop": 0.02, "pct": 0.15, "params": "forex"},
-    "UUP":  {"t212": "UUP_US_EQ",  "category": "💱 Forex",              "stop": 0.02, "pct": 0.15, "params": "forex"},
-    "FXB":  {"t212": "FXB_US_EQ",  "category": "💱 Forex",              "stop": 0.02, "pct": 0.10, "params": "forex"},
-    "FXY":  {"t212": "FXY_US_EQ",  "category": "💱 Forex",              "stop": 0.02, "pct": 0.10, "params": "forex"},
-    "BITO": {"t212": "BITO_US_EQ", "category": "₿ Crypto",              "stop": 0.07, "pct": 0.08, "params": "crypto"},
-    "IBIT": {"t212": "IBIT_US_EQ", "category": "₿ Crypto",              "stop": 0.07, "pct": 0.08, "params": "crypto"},
+    # Matières premières — ETCs physiques UCITS (LSE)
+    "PHAU": {"t212": "PHAUl_EQ", "yf": "PHAU.L", "category": "🪙 Matières premières", "stop": 0.03, "pct": 0.15, "params": "commodities"},
+    "PHAG": {"t212": "PHAGl_EQ", "yf": "PHAG.L", "category": "🪙 Matières premières", "stop": 0.03, "pct": 0.15, "params": "commodities"},
+    "CRUD": {"t212": "CRUDl_EQ", "yf": "CRUD.L", "category": "🪙 Matières premières", "stop": 0.04, "pct": 0.12, "params": "commodities"},
+    "NGAS": {"t212": "NGASl_EQ", "yf": "NGAS.L", "category": "🪙 Matières premières", "stop": 0.05, "pct": 0.10, "params": "commodities"},
+    # Actions — ETFs indiciels UCITS
+    "IUSA": {"t212": "IUSAl_EQ", "yf": "IUSA.L", "category": "📈 Actions",            "stop": 0.03, "pct": 0.15, "params": "equity"},
+    "EQQQ": {"t212": "EQQQl_EQ", "yf": "EQQQ.L", "category": "📈 Actions",            "stop": 0.04, "pct": 0.12, "params": "equity"},
+    "IWDA": {"t212": "IWDAl_EQ", "yf": "IWDA.L", "category": "📈 Actions",            "stop": 0.03, "pct": 0.12, "params": "equity"},
+    "XNAS": {"t212": "XNASl_EQ", "yf": "XNAS.L", "category": "📈 Actions",            "stop": 0.04, "pct": 0.10, "params": "equity"},
+    # Crypto — ETPs physiques UCITS
+    "BTIC": {"t212": "BTICd_EQ", "yf": "BTIC.DE", "category": "₿ Crypto",             "stop": 0.07, "pct": 0.08, "params": "crypto"},
+    "ETHE": {"t212": "ETHPl_EQ", "yf": "ETHP.L",  "category": "₿ Crypto",             "stop": 0.08, "pct": 0.08, "params": "crypto"},
 }
 
 # Table inverse T212 ticker → symbole yfinance. Évite le parsing fragile par str.replace().
@@ -582,47 +587,6 @@ def t212_post(endpoint: str, body: dict) -> object:
     return _t212_request("POST", f"{T212_BASE}{endpoint}", body=body)
 
 
-def check_instrument(t212_ticker: str) -> None:
-    """Log les infos de l'instrument depuis la liste complète."""
-    instruments = t212_get("/api/v0/equity/metadata/instruments")
-    if instruments is _API_ERROR or not isinstance(instruments, list):
-        logger.warning("check_instrument : impossible de lire la liste")
-        return
-    for inst in instruments:
-        if inst.get("ticker") == t212_ticker:
-            logger.info("check_instrument %s : minQty=%s maxQty=%s currency=%s",
-                        t212_ticker, inst.get("minTradeQuantity"),
-                        inst.get("maxTradeQuantity"), inst.get("currencyCode"))
-            return
-    logger.warning("check_instrument %s : introuvable dans la liste", t212_ticker)
-
-
-def diagnose_t212_account() -> None:
-    """Charge la liste complète des instruments T212 et cherche les équivalents UCITS."""
-    instruments = t212_get("/api/v0/equity/metadata/instruments")
-    if instruments is _API_ERROR or not instruments:
-        logger.warning("DIAG T212 : impossible de lire metadata/instruments")
-        return
-    if not isinstance(instruments, list):
-        logger.warning("DIAG T212 : format inattendu (%s)", type(instruments))
-        return
-
-    logger.info("DIAG T212 — %d instruments disponibles au total", len(instruments))
-
-    # Mots-clés à rechercher dans name/shortName/ticker
-    keywords = ["gold", "silver", "crude", "brent", "oil", "gas", "bitcoin", "ethereum",
-                "nasdaq", "s&p", "s&p 500", "sp500", "world", "wisdomtree", "ishares",
-                "xtrackers", "invesco", "vanguard", "physical", "ucits"]
-
-    seen: set = set()
-    for inst in instruments:
-        ticker = inst.get("ticker", "")
-        name   = (inst.get("name") or inst.get("shortName") or "").lower()
-        if any(kw in name or kw in ticker.lower() for kw in keywords):
-            if ticker not in seen:
-                seen.add(ticker)
-                logger.info("DIAG MATCH  ticker=%-20s  name=%s",
-                            ticker, inst.get("name") or inst.get("shortName"))
 
 
 def get_account() -> dict:
@@ -693,7 +657,6 @@ def place_buy_order(symbol: str, amount_eur: float, current_price: float) -> boo
         return False
     quantity = round(amount_eur / current_price, 6)
     t212_ticker = ASSETS[symbol]["t212"]
-    check_instrument(t212_ticker)
     logger.info("ACHAT %s : body → ticker=%s quantity=%s", symbol, t212_ticker, quantity)
     result   = t212_post("/api/v0/equity/orders/market", {
         "ticker": t212_ticker, "quantity": quantity,
@@ -745,7 +708,8 @@ def is_market_open() -> bool:
 
 def fetch_ohlcv(symbol: str) -> Optional[pd.DataFrame]:
     try:
-        ticker = yf.Ticker(symbol)
+        yf_sym = ASSETS[symbol]["yf"]
+        ticker = yf.Ticker(yf_sym)
         df = ticker.history(period=DATA_PERIOD, interval=DATA_INTERVAL, auto_adjust=True)
         if df.empty or len(df) < EMA_LONG + 1:
             logger.warning("%s : données insuffisantes (%d barres)", symbol, len(df))
@@ -759,7 +723,8 @@ def fetch_ohlcv(symbol: str) -> Optional[pd.DataFrame]:
 def _fetch_daily_trend(symbol: str) -> str:
     """EMA50 journalière — filtre de tendance de fond. Retourne 'bullish'/'bearish'/'unknown'."""
     try:
-        ticker = yf.Ticker(symbol)
+        yf_sym = ASSETS[symbol]["yf"]
+        ticker = yf.Ticker(yf_sym)
         df = ticker.history(period=DAILY_PERIOD, interval="1d", auto_adjust=True)
         if df is None or df.empty or len(df) < 50:
             return "unknown"
@@ -983,7 +948,7 @@ def check_correlation_allowed(symbol: str, positions_map: dict) -> tuple[bool, s
     Retourne (autorisé, raison_si_refus).
 
     Règles :
-    1. Paires mutuellement exclusives (GLD+SLV, BITO+IBIT)
+    1. Paires mutuellement exclusives (PHAU+PHAG, EQQQ+XNAS, BTIC+ETHE)
     2. Max MAX_PER_CATEGORY positions simultanées par catégorie
     """
     open_symbols    = {sym for sym in ASSETS if sym in positions_map}
@@ -1021,7 +986,8 @@ def _fetch_historical_returns(symbols: list[str], days: int = 25) -> dict[str, p
 
     def _one(sym: str) -> Optional[pd.Series]:
         try:
-            df = yf.Ticker(sym).history(
+            yf_sym = ASSETS[sym]["yf"]
+            df = yf.Ticker(yf_sym).history(
                 period=f"{days + 5}d", interval="1d", auto_adjust=True)
             if df is None or df.empty or len(df) < days:
                 return None
@@ -1529,7 +1495,6 @@ def run_strategy() -> None:
 
     # ── Mode TEST_TRADE : forcer un achat de 1€ sur le premier actif sans position ──
     if TEST_TRADE:
-        diagnose_t212_account()
         test_sym = next((s for s in active_symbols if s not in positions_map), None)
         if test_sym and all_signals.get(test_sym):
             logger.info("TEST_TRADE activé — achat forcé 1€ sur %s", test_sym)
@@ -1686,7 +1651,7 @@ def main() -> None:
         + "\n".join(f"{cat} : {', '.join(syms)}" for cat, syms in categories.items())
         + f"\n\nSizing ATR | Trailing stop +{TRAILING_ACTIVATION_PCT*100:.0f}% | "
         f"Max {MAX_OPEN_POSITIONS} positions\n"
-        f"Corrélation : GLD≠SLV, BITO≠IBIT | Max {MAX_PER_CATEGORY}/catégorie\n\n"
+        f"Corrélation : PHAU≠PHAG, EQQQ≠XNAS, BTIC≠ETHE | Max {MAX_PER_CATEGORY}/catégorie\n\n"
         f"💼 Portfolio : <b>{account.get('portfolio_value', 0):.2f} €</b>\n"
         f"💵 Disponible : <b>{account.get('buying_power', 0):.2f} €</b>"
     )
