@@ -655,7 +655,7 @@ def place_buy_order(symbol: str, amount_eur: float, current_price: float) -> boo
     if amount_eur < MIN_ORDER_EUR:
         logger.warning("%s montant trop faible : %.2f€", symbol, amount_eur)
         return False
-    quantity = round(amount_eur / current_price, 6)
+    quantity = round(amount_eur / current_price, 4)
     t212_ticker = ASSETS[symbol]["t212"]
     logger.info("ACHAT %s : body → ticker=%s quantity=%s", symbol, t212_ticker, quantity)
     result   = t212_post("/api/v0/equity/orders/market", {
