@@ -597,6 +597,24 @@ def check_instrument(t212_ticker: str) -> None:
                     data.get("currencyCode"))
 
 
+def diagnose_t212_account() -> None:
+    """Diagnostic complet : type de compte + premiers instruments disponibles."""
+    info = t212_get("/api/v0/equity/account/info")
+    if info is _API_ERROR or not info:
+        logger.warning("DIAG T212 : impossible de lire account/info")
+    else:
+        logger.info("DIAG T212 account/info : %s", info)
+
+    instruments = t212_get("/api/v0/equity/metadata/instruments")
+    if instruments is _API_ERROR or not instruments:
+        logger.warning("DIAG T212 : impossible de lire metadata/instruments")
+    else:
+        sample = instruments[:10] if isinstance(instruments, list) else list(instruments.values())[:10]
+        for inst in sample:
+            logger.info("DIAG T212 instrument : ticker=%s name=%s",
+                        inst.get("ticker"), inst.get("name", inst.get("shortName", "?")))
+
+
 def get_account() -> dict:
     data = t212_get("/api/v0/equity/account/cash")
     if data is _API_ERROR or not data:
@@ -1501,6 +1519,7 @@ def run_strategy() -> None:
 
     # ── Mode TEST_TRADE : forcer un achat de 1€ sur le premier actif sans position ──
     if TEST_TRADE:
+        diagnose_t212_account()
         test_sym = next((s for s in active_symbols if s not in positions_map), None)
         if test_sym and all_signals.get(test_sym):
             logger.info("TEST_TRADE activé — achat forcé 1€ sur %s", test_sym)
