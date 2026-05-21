@@ -13,6 +13,7 @@ Broker    : Trading 212 Invest (fractions, 0 commission)
 # SECTION 1 — IMPORTS & CONFIG
 # ============================================================
 
+import base64
 import json
 import logging
 import os
@@ -34,6 +35,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ---- Clés API ----
+T212_API_KEY_ID: str = os.getenv("T212_API_KEY_ID", "")
 T212_API_KEY: str = os.getenv("T212_API_KEY", "")
 T212_DEMO: bool = os.getenv("T212_DEMO", "true").lower() == "true"
 TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -173,8 +175,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger("TradingBot")
 
-if not T212_API_KEY:
-    raise ValueError("T212_API_KEY requis dans le .env")
+if not T212_API_KEY or not T212_API_KEY_ID:
+    raise ValueError("T212_API_KEY et T212_API_KEY_ID requis dans le .env")
+
+# Basic auth : base64(KEY_ID:SECRET) — format officiel T212 API v0
+_T212_AUTH = "Basic " + base64.b64encode(
+    f"{T212_API_KEY_ID}:{T212_API_KEY}".encode()
+).decode()
 if not TELEGRAM_BOT_TOKEN or not CHAT_ID:
     raise ValueError("TELEGRAM_BOT_TOKEN et CHAT_ID requis dans le .env")
 
@@ -522,7 +529,7 @@ def _get_circuit_breaker_pct() -> float:
 
 def _t212_request(method: str, url: str, body: Optional[dict] = None) -> object:
     """Retry automatique (2s, 4s). Retourne : json | None (404) | _API_ERROR."""
-    headers = {"Authorization": T212_API_KEY}
+    headers = {"Authorization": _T212_AUTH}
     if body is not None:
         headers["Content-Type"] = "application/json"
     last_exc = None

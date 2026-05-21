@@ -36,23 +36,10 @@ jobs:
       - name: Installation des dépendances
         run: pip install -r requirements.txt
 
-      - name: Diagnostic API T212
-        env:
-          T212_API_KEY: ${{ secrets.T212_API_KEY }}
-          T212_API_KEY_ID: ${{ secrets.T212_API_KEY_ID }}
-        run: |
-          echo "=== Test ID:SECRET combiné ==="
-          curl -s -w "\nHTTP:%{http_code}" \
-            -H "Authorization: ${T212_API_KEY_ID}:${T212_API_KEY}" \
-            https://demo.trading212.com/api/v0/equity/account/cash
-          echo ""
-          echo "=== Test sans auth (doit retourner 401 aussi) ==="
-          curl -s -w "\nHTTP:%{http_code}" \
-            https://demo.trading212.com/api/v0/equity/account/cash
-
       - name: Exécution de la stratégie
         env:
           T212_API_KEY: ${{ secrets.T212_API_KEY }}
+          T212_API_KEY_ID: ${{ secrets.T212_API_KEY_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           T212_DEMO: ${{ secrets.T212_DEMO || 'true' }}
