@@ -1,5 +1,5 @@
 trading:
-  mode: LIVE                 # DEMO | LIVE
+  mode: DEMO                 # DEMO | LIVE
   live_capital_limit: 500    # montant max total engageable en € (mode LIVE uniquement)
   calibration_days: 30       # premiers N jours live = sizing 50%
 

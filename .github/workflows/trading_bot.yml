@@ -41,7 +41,7 @@ jobs:
           T212_API_KEY: ${{ secrets.T212_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-          T212_DEMO: ${{ secrets.T212_DEMO || 'false' }}
+          T212_DEMO: ${{ secrets.T212_DEMO || 'true' }}
           STOP_LOSS_PCT: '0.03'
           MAX_POSITION_PCT: '0.20'
           DAILY_LOSS_LIMIT_PCT: '0.05'
