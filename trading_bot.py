@@ -647,9 +647,8 @@ def place_buy_order(symbol: str, amount_eur: float, current_price: float) -> boo
         logger.warning("%s montant trop faible : %.2f€", symbol, amount_eur)
         return False
     quantity = round(amount_eur / current_price, 6)
-    result   = t212_post("/api/v0/equity/orders", {
+    result   = t212_post("/api/v0/equity/orders/market", {
         "ticker": ASSETS[symbol]["t212"], "quantity": quantity,
-        "type": "MARKET", "timeValidity": "DAY",
     })
     if result is _API_ERROR:
         logger.error("ACHAT %s échoué : T212 inaccessible", symbol)
@@ -669,9 +668,8 @@ def close_position(symbol: str) -> bool:
         return False
     if not position:
         return True
-    result = t212_post("/api/v0/equity/orders", {
-        "ticker": ASSETS[symbol]["t212"], "quantity": position["qty"],
-        "type": "MARKET", "timeValidity": "DAY",
+    result = t212_post("/api/v0/equity/orders/market", {
+        "ticker": ASSETS[symbol]["t212"], "quantity": -position["qty"],
     })
     if result is _API_ERROR:
         logger.error("VENTE %s échouée : T212 inaccessible", symbol)
