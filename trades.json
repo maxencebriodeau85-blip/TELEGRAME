@@ -10,5 +10,17 @@
     "daily_trend": "bearish",
     "calibration_factor": 1.0,
     "timestamp": "2026-05-21T19:32:32.507910"
+  },
+  {
+    "symbol": "PHAG",
+    "side": "BUY",
+    "category": "🪙 Matières premières",
+    "price": 69.05999755859375,
+    "amount_eur": 2.0,
+    "atr": 0.13840557856086963,
+    "confluence_score": 2,
+    "daily_trend": "bearish",
+    "calibration_factor": 1.0,
+    "timestamp": "2026-05-22T12:38:24.762554"
   }
 ]
