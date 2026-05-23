@@ -63,14 +63,15 @@ if __name__ == "__main__":
     # Traiter les commandes Telegram (/pause, /resume, /status) à chaque run
     poll_telegram_commands()
 
-    if not is_market_open():
-        logger.info("Marché fermé — analyse ignorée")
-    elif now_ldn.hour == 16 and 30 <= now_ldn.minute < 50:
-        # Résumé journalier — envoyé une seule fois (fenêtre 16h30–16h49 London, après clôture LSE)
+    if now_ldn.hour == 16 and 30 <= now_ldn.minute < 50:
+        # Résumé journalier — fenêtre 16h30–16h49 London (après clôture LSE)
+        # DOIT être testé AVANT is_market_open() car le marché est déjà fermé à 16h31
         logger.info("Envoi du résumé journalier")
         daily_summary()
+    elif not is_market_open():
+        logger.info("Marché fermé — analyse ignorée")
     elif now_ldn.hour == 8 and 0 <= now_ldn.minute < 20:
-        # Message d'ouverture — envoyé une seule fois à l'ouverture LSE (8h00–8h19 London)
+        # Message d'ouverture — une seule fois à l'ouverture LSE (8h00–8h19 London)
         mode = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
         account = get_account()
         bal = f"{account['portfolio_value']:.2f}€" if account else "N/A"

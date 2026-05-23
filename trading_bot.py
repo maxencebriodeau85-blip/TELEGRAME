@@ -33,6 +33,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from dotenv import load_dotenv
 
 load_dotenv()
+yf.set_tz_cache_location("/tmp/yfinance")
 
 # ---- Clés API ----
 T212_API_KEY_ID: str = os.getenv("T212_API_KEY_ID", "")
@@ -226,7 +227,7 @@ def save_trade(trade: dict) -> None:
 
 def load_daily_pnl() -> dict:
     data  = load_json(DAILY_PNL_FILE, {})
-    today = str(datetime.now(ZoneInfo("America/New_York")).date())
+    today = str(datetime.now(ZoneInfo("Europe/London")).date())
     if data.get("date") != today:
         data = {"date": today, "start_value": None, "trades": 0, "pnl": 0.0}
         save_json(DAILY_PNL_FILE, data)
@@ -293,8 +294,8 @@ def record_day_result(pnl: float) -> int:
     Met à jour le streak journalier et le suivi hebdomadaire (pour le CB progressif).
     """
     stats      = load_risk_stats()
-    now_ny     = datetime.now(ZoneInfo("America/New_York"))
-    today      = str(now_ny.date())
+    now_ldn    = datetime.now(ZoneInfo("Europe/London"))
+    today      = str(now_ldn.date())
 
     if stats.get("last_date") != today:
         stats["win_streak"]       = stats.get("win_streak", 0) + 1 if pnl >= 0 else 0
@@ -302,7 +303,7 @@ def record_day_result(pnl: float) -> int:
         stats["current_week_pnl"] = stats.get("current_week_pnl", 0.0) + pnl
 
         # Vendredi = clôture de semaine
-        if now_ny.weekday() == 4:
+        if now_ldn.weekday() == 4:
             history  = stats.get("weekly_results", [])
             week_pnl = stats["current_week_pnl"]
             history.append({"date": today, "pnl": round(week_pnl, 2)})
@@ -679,8 +680,9 @@ def close_position(symbol: str) -> bool:
         return False
     if not position:
         return True
+    qty = round(position["qty"], 4)
     result = t212_post("/api/v0/equity/orders/market", {
-        "ticker": ASSETS[symbol]["t212"], "quantity": -position["qty"],
+        "ticker": ASSETS[symbol]["t212"], "quantity": -qty,
     })
     if result is _API_ERROR:
         logger.error("VENTE %s échouée : T212 inaccessible", symbol)
@@ -1110,7 +1112,7 @@ def should_buy(signals: dict, has_position: bool, force: bool = False) -> bool:
         )
     return (
         signals["trend_bullish"]
-        and signals["rsi"] < signals["rsi_buy"]
+        and signals["rsi"] <= signals["rsi_buy"]
         and signals["macd_bull_cross"]
         and signals["daily_trend"] != "bearish"
     )
@@ -1459,11 +1461,8 @@ def _handle_asset(
 # ============================================================
 
 def run_strategy() -> None:
-    """Appelé toutes les 20 min par GitHub Actions."""
+    """Appelé toutes les 10 min par GitHub Actions (ou par le scheduler local)."""
     logger.info("=== Analyse (%d actifs) ===", len(ASSETS))
-
-    # Traite les commandes /pause /resume reçues depuis le dernier run
-    poll_telegram_commands()
 
     ctrl = load_bot_control()
     if ctrl.get("paused"):
@@ -1657,12 +1656,14 @@ def main() -> None:
         f"💵 Disponible : <b>{account.get('buying_power', 0):.2f} €</b>"
     )
 
-    scheduler = BlockingScheduler(timezone="America/New_York")
+    scheduler = BlockingScheduler(timezone="Europe/London")
+    scheduler.add_job(poll_telegram_commands, "cron", day_of_week="mon-fri",
+                      hour="7-17", minute="*/10", id="poll_commands")
     scheduler.add_job(run_strategy, "cron", day_of_week="mon-fri",
-                      hour="9-15", minute="5,25,45", id="run_strategy")
+                      hour="8-16", minute="*/10", id="run_strategy")
     scheduler.add_job(daily_summary, "cron", day_of_week="mon-fri",
-                      hour=16, minute=5, id="daily_summary")
-    logger.info("Scheduler actif — 20 min / 9h30–16h NY / lun–ven")
+                      hour=16, minute=35, id="daily_summary")
+    logger.info("Scheduler actif — 10 min / 8h–16h30 London / lun–ven")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
