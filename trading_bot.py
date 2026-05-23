@@ -113,19 +113,19 @@ MAX_PER_CATEGORY = 2   # max positions simultanées par catégorie
 # Note : _T212_TO_SYMBOL est construit APRÈS la définition de ASSETS (voir fin de cette section)
 
 ASSETS: dict[str, dict] = {
-    # Matières premières — ETCs physiques UCITS (LSE)
-    "PHAU": {"t212": "PHAUl_EQ", "yf": "PHAU.L", "category": "🪙 Matières premières", "stop": 0.03, "pct": 0.15, "params": "commodities"},
-    "PHAG": {"t212": "PHAGl_EQ", "yf": "PHAG.L", "category": "🪙 Matières premières", "stop": 0.03, "pct": 0.15, "params": "commodities"},
-    "CRUD": {"t212": "CRUDl_EQ", "yf": "CRUD.L", "category": "🪙 Matières premières", "stop": 0.04, "pct": 0.12, "params": "commodities"},
-    "NGAS": {"t212": "NGASl_EQ", "yf": "NGAS.L", "category": "🪙 Matières premières", "stop": 0.05, "pct": 0.10, "params": "commodities"},
-    # Actions — ETFs indiciels UCITS
-    "IUSA": {"t212": "IUSAl_EQ", "yf": "IUSA.L", "category": "📈 Actions",            "stop": 0.03, "pct": 0.15, "params": "equity"},
-    "EQQQ": {"t212": "EQQQl_EQ", "yf": "EQQQ.L", "category": "📈 Actions",            "stop": 0.04, "pct": 0.12, "params": "equity"},
-    "IWDA": {"t212": "IWDAl_EQ", "yf": "IWDA.L", "category": "📈 Actions",            "stop": 0.03, "pct": 0.12, "params": "equity"},
-    "XNAS": {"t212": "XNASl_EQ", "yf": "XNAS.L", "category": "📈 Actions",            "stop": 0.04, "pct": 0.10, "params": "equity"},
-    # Crypto — ETPs physiques UCITS
-    "BTCE": {"t212": "BTCEd_EQ", "yf": "BTCE.DE", "category": "₿ Crypto",             "stop": 0.07, "pct": 0.08, "params": "crypto"},
-    "ETHE": {"t212": "ETHPl_EQ", "yf": "ETHP.L",  "category": "₿ Crypto",             "stop": 0.08, "pct": 0.08, "params": "crypto"},
+    # Matières premières — ETCs physiques UCITS (LSE, prix en GBP)
+    "PHAU": {"t212": "PHAUl_EQ", "yf": "PHAU.L", "ccy": "£", "category": "🪙 Matières premières", "stop": 0.03, "pct": 0.15, "params": "commodities"},
+    "PHAG": {"t212": "PHAGl_EQ", "yf": "PHAG.L", "ccy": "£", "category": "🪙 Matières premières", "stop": 0.03, "pct": 0.15, "params": "commodities"},
+    "CRUD": {"t212": "CRUDl_EQ", "yf": "CRUD.L", "ccy": "£", "category": "🪙 Matières premières", "stop": 0.04, "pct": 0.12, "params": "commodities"},
+    "NGAS": {"t212": "NGASl_EQ", "yf": "NGAS.L", "ccy": "£", "category": "🪙 Matières premières", "stop": 0.05, "pct": 0.10, "params": "commodities"},
+    # Actions — ETFs indiciels UCITS (LSE, prix en USD ou GBP selon ETF)
+    "IUSA": {"t212": "IUSAl_EQ", "yf": "IUSA.L", "ccy": "$", "category": "📈 Actions",            "stop": 0.03, "pct": 0.15, "params": "equity"},
+    "EQQQ": {"t212": "EQQQl_EQ", "yf": "EQQQ.L", "ccy": "$", "category": "📈 Actions",            "stop": 0.04, "pct": 0.12, "params": "equity"},
+    "IWDA": {"t212": "IWDAl_EQ", "yf": "IWDA.L", "ccy": "$", "category": "📈 Actions",            "stop": 0.03, "pct": 0.12, "params": "equity"},
+    "XNAS": {"t212": "XNASl_EQ", "yf": "XNAS.L", "ccy": "$", "category": "📈 Actions",            "stop": 0.04, "pct": 0.10, "params": "equity"},
+    # Crypto — ETPs physiques UCITS (Xetra EUR / LSE USD)
+    "BTCE": {"t212": "BTCEd_EQ", "yf": "BTCE.DE", "ccy": "€", "category": "₿ Crypto",             "stop": 0.07, "pct": 0.08, "params": "crypto"},
+    "ETHE": {"t212": "ETHPl_EQ", "yf": "ETHP.L",  "ccy": "$", "category": "₿ Crypto",             "stop": 0.08, "pct": 0.08, "params": "crypto"},
 }
 
 # Table inverse T212 ticker → symbole yfinance. Évite le parsing fragile par str.replace().
@@ -257,7 +257,7 @@ def init_position_meta(symbol: str, entry_price: float) -> None:
     meta[symbol] = {
         "entry_price": entry_price,
         "max_price":   entry_price,
-        "opened_at":   datetime.now().isoformat(),
+        "opened_at":   datetime.now(ZoneInfo("Europe/London")).isoformat(),
     }
     save_positions_meta(meta)
 
@@ -404,7 +404,7 @@ def save_bot_control(ctrl: dict) -> None:
 
 def log_decision(symbol: str, action: str, reason: str, signals: Optional[dict] = None) -> None:
     """Écrit chaque décision dans decisions.log. Cap à 5 000 lignes si le fichier dépasse 1 Mo."""
-    now = datetime.now(ZoneInfo("America/New_York")).isoformat()
+    now = datetime.now(ZoneInfo("Europe/London")).isoformat()
     sig_str = ""
     if signals:
         sig_str = (
@@ -464,7 +464,7 @@ def poll_telegram_commands() -> None:
             cmd = text.split()[0].lower() if text else ""
             if cmd == "/pause":
                 ctrl["paused"] = True
-                ctrl["paused_at"] = datetime.now().isoformat()
+                ctrl["paused_at"] = datetime.now(ZoneInfo("Europe/London")).isoformat()
                 send_telegram(
                     "⏸️ <b>Bot en pause</b>\n"
                     "Stratégie suspendue — positions existantes conservées.\n"
@@ -513,7 +513,7 @@ def _calibration_factor() -> float:
     try:
         start    = datetime.fromisoformat(cal_start).date()
         cal_days = load_config().get("trading", {}).get("calibration_days", 30)
-        days     = (datetime.now(ZoneInfo("America/New_York")).date() - start).days
+        days     = (datetime.now(ZoneInfo("Europe/London")).date() - start).days
         return 0.5 if days < cal_days else 1.0
     except Exception:
         return 0.5
@@ -533,7 +533,7 @@ def _get_circuit_breaker_pct() -> float:
 
     try:
         start     = datetime.fromisoformat(live_start).date()
-        days_live = (datetime.now(ZoneInfo("America/New_York")).date() - start).days
+        days_live = (datetime.now(ZoneInfo("Europe/London")).date() - start).days
     except Exception:
         return CB_PHASE1_PCT
 
@@ -1173,7 +1173,7 @@ def check_daily_loss_limit() -> bool:
                 _close_all_positions()
                 ctrl           = load_bot_control()
                 ctrl["paused"] = True
-                ctrl["paused_at"] = datetime.now().isoformat()
+                ctrl["paused_at"] = datetime.now(ZoneInfo("Europe/London")).isoformat()
                 save_bot_control(ctrl)
                 send_telegram(
                     f"🚨 <b>ARRÊT D'URGENCE — Drawdown cumulé</b>\n"
@@ -1229,18 +1229,19 @@ def _execute_trailing_stop(
         log_decision(symbol, "TRAILING_STOP",
             f"PL={pl:+.2f}€ ({position['unrealized_plpc']*100:+.1f}%) "
             f"max={max_price:.4f} stop={stop_price:.4f}")
+        ccy = asset_cfg["ccy"]
         send_telegram(
             f"📉 <b>TRAILING STOP {symbol}</b> [{mode}] {asset_cfg['category']}\n"
             f"P&L : <b>{pl:+.2f} €</b> ({position['unrealized_plpc']*100:+.1f}%)\n"
-            f"Prix : {signals['price']:.4f} $ | Max atteint : {max_price:.4f} $\n"
-            f"Stop déclenché à {stop_price:.4f} $ (-{stop_pct*100:.0f}% du max)"
+            f"Prix : {signals['price']:.4f} {ccy} | Max atteint : {max_price:.4f} {ccy}\n"
+            f"Stop déclenché à {stop_price:.4f} {ccy} (-{stop_pct*100:.0f}% du max)"
         )
         save_trade({
             "symbol": symbol, "side": "SELL_TRAILING",
             "category": asset_cfg["category"],
             "price": signals["price"], "pl": pl,
             "max_price": max_price, "stop_price": stop_price,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(ZoneInfo("Europe/London")).isoformat(),
         })
         logger.info("TRAILING STOP %s — PL=%.2f€", symbol, pl)
 
@@ -1259,13 +1260,13 @@ def _execute_stop_loss(symbol: str, signals: dict, position: dict, mode: str) ->
         send_telegram(
             f"🛑 <b>STOP-LOSS {symbol}</b> [{mode}] {asset_cfg['category']}\n"
             f"Perte : <b>{pl:+.2f} €</b> ({position['unrealized_plpc']*100:+.1f}%)\n"
-            f"Seuil : -{stop_pct*100:.0f}% | Prix : {signals['price']:.4f} $"
+            f"Seuil : -{stop_pct*100:.0f}% | Prix : {signals['price']:.4f} {asset_cfg['ccy']}"
         )
         save_trade({
             "symbol": symbol, "side": "SELL_STOPLOSS",
             "category": asset_cfg["category"],
             "price": signals["price"], "pl": pl,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(ZoneInfo("Europe/London")).isoformat(),
         })
         logger.info("STOP-LOSS %s — PL=%.2f€", symbol, pl)
 
@@ -1288,7 +1289,7 @@ def _execute_sell(symbol: str, signals: dict, position: dict, mode: str) -> None
         send_telegram(
             f"📤 <b>VENTE {symbol}</b> [{mode}] {asset_cfg['category']}\n"
             f"P&L : <b>{pl:+.2f} €</b> ({position['unrealized_plpc']*100:+.1f}%)\n"
-            f"Prix : {signals['price']:.4f} $ | RSI : {signals['rsi']:.1f}\n"
+            f"Prix : {signals['price']:.4f} {asset_cfg['ccy']} | RSI : {signals['rsi']:.1f}\n"
             f"Raison : {' + '.join(reasons)}"
         )
         save_trade({
@@ -1296,7 +1297,7 @@ def _execute_sell(symbol: str, signals: dict, position: dict, mode: str) -> None
             "category": asset_cfg["category"],
             "price": signals["price"], "pl": pl,
             "reason": " + ".join(reasons),
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(ZoneInfo("Europe/London")).isoformat(),
         })
         logger.info("VENTE %s — PL=%.2f€", symbol, pl)
 
@@ -1339,8 +1340,8 @@ def _execute_buy(
         send_telegram(
             f"📥 <b>ACHAT {symbol}</b> [{mode}] {asset_cfg['category']}\n"
             f"Montant : <b>{amount:.2f} €</b> (≈ {qty_approx:.4f} actions)\n"
-            f"Prix : {signals['price']:.4f} $ | RSI : {signals['rsi']:.1f}/{signals['rsi_buy']}\n"
-            f"ATR : {signals['atr']:.4f} $ | Risque max : {atr_stop_eur:.2f} €\n"
+            f"Prix : {signals['price']:.4f} {asset_cfg['ccy']} | RSI : {signals['rsi']:.1f}/{signals['rsi_buy']}\n"
+            f"ATR : {signals['atr']:.4f} {asset_cfg['ccy']} | Risque max : {atr_stop_eur:.2f} €\n"
             f"EMA ✅ | MACD ↗ ✅ | Vol : {'✅' if signals['volume_ok'] else '⚠️'} | "
             f"Trend J : {daily_emoji}\n"
             f"Confluence : <b>{signals['confluence_score']}/5</b> | "
@@ -1357,12 +1358,12 @@ def _execute_buy(
                 )
                 ctrl["first_live_order_done"]   = True
                 ctrl["calibration_live_start"]  = ctrl.get("calibration_live_start") \
-                                                  or datetime.now().isoformat()
+                                                  or datetime.now(ZoneInfo("Europe/London")).isoformat()
                 save_bot_control(ctrl)
             # Marquer la date de démarrage live dans risk_stats pour le CB progressif
             stats = load_risk_stats()
             if not stats.get("live_start_date"):
-                stats["live_start_date"] = datetime.now().isoformat()
+                stats["live_start_date"] = datetime.now(ZoneInfo("Europe/London")).isoformat()
                 save_json(RISK_STATS_FILE, stats)
 
         cal_note = f" [calibration {cal*100:.0f}%]" if cal < 1.0 else ""
@@ -1377,7 +1378,7 @@ def _execute_buy(
             "confluence_score": signals["confluence_score"],
             "daily_trend": signals["daily_trend"],
             "calibration_factor": cal,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(ZoneInfo("Europe/London")).isoformat(),
         })
         logger.info("ACHAT %s — %.2f€ | ATR=%.4f | confluence=%d/5 | cal=%.0f%%",
                     symbol, amount, signals["atr"], signals["confluence_score"], cal * 100)
@@ -1543,7 +1544,7 @@ def daily_summary() -> None:
     streak    = record_day_result(pnl)
 
     lines = [
-        f"📊 <b>Résumé {datetime.now().strftime('%d/%m/%Y')}</b> [{mode}]",
+        f"📊 <b>Résumé {datetime.now(ZoneInfo('Europe/London')).strftime('%d/%m/%Y')}</b> [{mode}]",
         "",
         f"💼 Portfolio : <b>{account.get('portfolio_value', 0):.2f} €</b>",
         f"💵 Disponible : {account.get('buying_power', 0):.2f} €",
@@ -1569,7 +1570,7 @@ def daily_summary() -> None:
                 trail = f" | max={meta['max_price']:.4f}" if "max_price" in meta else ""
                 lines.append(
                     f"  {arrow} <b>{p['symbol']}</b> | "
-                    f"{p['avg_entry_price']:.4f}→{p['current_price']:.4f} ${trail} | "
+                    f"{p['avg_entry_price']:.4f}→{p['current_price']:.4f} {ASSETS.get(p['symbol'], {}).get('ccy', '')}{trail} | "
                     f"P&L : {p['unrealized_pl']:+.2f} € ({p['unrealized_plpc']*100:+.1f}%)"
                 )
     else:
