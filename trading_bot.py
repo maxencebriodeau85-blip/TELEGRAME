@@ -125,7 +125,7 @@ ASSETS: dict[str, dict] = {
     "XNAS": {"t212": "XNASl_EQ", "yf": "XNAS.L", "ccy": "$", "category": "📈 Actions",            "stop": 0.04, "pct": 0.10, "params": "equity"},
     # Crypto — ETPs physiques UCITS (Xetra EUR / LSE USD)
     "BTCE": {"t212": "BTCEd_EQ", "yf": "BTCE.DE", "ccy": "€", "category": "₿ Crypto",             "stop": 0.07, "pct": 0.08, "params": "crypto"},
-    "ETHE": {"t212": "ETHPl_EQ", "yf": "ETHP.L",  "ccy": "$", "category": "₿ Crypto",             "stop": 0.08, "pct": 0.08, "params": "crypto"},
+    "ETHE": {"t212": "ZETHd_EQ", "yf": "ZETH.DE",  "ccy": "€", "category": "₿ Crypto",             "stop": 0.08, "pct": 0.08, "params": "crypto"},
 }
 
 # Table inverse T212 ticker → symbole yfinance. Évite le parsing fragile par str.replace().
@@ -656,9 +656,13 @@ def place_buy_order(symbol: str, amount_eur: float, current_price: float) -> boo
     if amount_eur < MIN_ORDER_EUR:
         logger.warning("%s montant trop faible : %.2f€", symbol, amount_eur)
         return False
-    quantity = round(amount_eur / current_price, 4)
+    ccy = ASSETS[symbol]["ccy"]
+    fx_to_eur = _get_fx_to_eur(ccy)             # 1 ccy = fx_to_eur EUR
+    amount_ccy = amount_eur / fx_to_eur          # EUR → devise native de l'actif
+    quantity = round(amount_ccy / current_price, 4)
     t212_ticker = ASSETS[symbol]["t212"]
-    logger.info("ACHAT %s : body → ticker=%s quantity=%s", symbol, t212_ticker, quantity)
+    logger.info("ACHAT %s : body → ticker=%s quantity=%s (%.2f€ → %.2f%s / %.4f)",
+                symbol, t212_ticker, quantity, amount_eur, amount_ccy, ccy, current_price)
     result   = t212_post("/api/v0/equity/orders/market", {
         "ticker": t212_ticker, "quantity": quantity,
     })
@@ -702,6 +706,29 @@ def is_market_open() -> bool:
         <= now <=
         now.replace(hour=16, minute=30, second=0, microsecond=0)
     )
+
+
+_FX_CACHE: dict[str, float] = {}
+
+def _get_fx_to_eur(ccy: str) -> float:
+    """1 unité de ccy = ? EUR. Mis en cache pour la durée du run."""
+    if ccy == "€":
+        return 1.0
+    if ccy in _FX_CACHE:
+        return _FX_CACHE[ccy]
+    pairs = {"£": "GBPEUR=X", "$": "USDEUR=X"}
+    sym = pairs.get(ccy)
+    if not sym:
+        _FX_CACHE[ccy] = 1.0
+        return 1.0
+    try:
+        df = yf.Ticker(sym).history(period="2d", interval="1d", auto_adjust=True)
+        rate = float(df["Close"].iloc[-1]) if not df.empty else 1.0
+    except Exception:
+        rate = 1.0
+    _FX_CACHE[ccy] = rate
+    logger.info("FX %s/EUR : %.4f", ccy, rate)
+    return rate
 
 
 # ============================================================
@@ -767,7 +794,7 @@ def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     rs    = gain / loss.replace(0, np.nan)
     rsi   = 100 - (100 / (1 + rs))
     if rsi.isna().any():
-        logger.warning("RSI contient des NaN (série plate ou données insuffisantes) — remplacé par 50")
+        logger.debug("RSI NaN (série plate ou hors-marché) — remplacé par 50")
         rsi = rsi.fillna(50.0)
     return rsi
 
