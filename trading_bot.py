@@ -1556,7 +1556,7 @@ def run_strategy() -> None:
 
 def daily_summary() -> None:
     """
-    Résumé 16h05 NY enrichi :
+    Résumé 16h30 London enrichi :
     - P&L, positions, streak
     - VaR 95% historique 20j
     - Exposition par catégorie
