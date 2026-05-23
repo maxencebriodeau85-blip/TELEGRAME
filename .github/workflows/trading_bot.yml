@@ -46,11 +46,9 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           T212_DEMO: ${{ secrets.T212_DEMO || 'true' }}
-          STOP_LOSS_PCT: '0.03'
-          MAX_POSITION_PCT: '0.20'
           DAILY_LOSS_LIMIT_PCT: '0.05'
           DEBUG: 'false'
-          TEST_TRADE: 'true'
+          TEST_TRADE: 'false'
         run: python run_once.py
 
       - name: Sauvegarde de l'état (trades, PnL)

@@ -50,7 +50,6 @@ T212_BASE = "https://demo.trading212.com" if T212_DEMO else "https://live.tradin
 # PARAMÈTRES DE SIGNAL PAR CATÉGORIE
 # ============================================================
 #
-# Forex 24/52/18 : peu volatile, MACD standard génère trop de faux croisements 15min
 # Crypto 8/17/9 : forte volatilité, MACD rapide capture les accélérations intraday
 # Vente sell_min=2 : requiert 2/3 critères baissiers — évite les sorties prématurées
 
@@ -82,7 +81,7 @@ SIGNAL_PARAMS: dict[str, dict] = {
 # Interprétation : si le prix bouge de (ATR × atr_mult) contre nous,
 # la perte est exactement risk_pct × portfolio.
 #
-# Forex risk_pct réduit (0.5%) car ETF peu volatils avec stop 2%
+# Matières premières/équité risk_pct modéré (0.8-1%)
 # Crypto risk_pct plus élevé (1.5%) pour capter les amplitudes
 
 SIZING_PARAMS: dict[str, dict] = {
@@ -1395,7 +1394,7 @@ def _execute_buy(
 
         cal_note = f" [calibration {cal*100:.0f}%]" if cal < 1.0 else ""
         log_decision(symbol, "ACHAT_ORDRE",
-            f"{amount:.2f}€ prix={signals['price']:.4f}${cal_note}", signals)
+            f"{amount:.2f}€ prix={signals['price']:.4f}{asset_cfg['ccy']}{cal_note}", signals)
         init_position_meta(symbol, signals["price"])
         save_trade({
             "symbol": symbol, "side": "BUY",
