@@ -364,6 +364,19 @@ def send_telegram(text: str) -> None:
             logger.error("Telegram tentative %d/3 : %s", attempt + 1, e)
 
 
+def _send_error_alert(msg: str) -> None:
+    """Alerte Telegram pour erreurs critiques, throttlée à 1 message par 30 min.
+    Évite le spam en cas de panne prolongée (GitHub Actions s'exécute toutes les 10 min).
+    """
+    ctrl = load_bot_control()
+    last = ctrl.get("last_error_alert_ts", 0)
+    if time.time() - last < 1800:
+        return
+    send_telegram(f"⚠️ <b>Erreur bot</b>\n{msg}")
+    ctrl["last_error_alert_ts"] = time.time()
+    save_bot_control(ctrl)
+
+
 # ============================================================
 # SECTION 2.5 — CONFIG, CONTRÔLE & AUDIT
 # ============================================================
@@ -624,10 +637,14 @@ def get_position(symbol: str) -> Optional[dict]:
     }
 
 
-def get_all_positions() -> list[dict]:
-    """Un seul appel T212 pour toutes les positions."""
+def get_all_positions() -> Optional[list[dict]]:
+    """Un seul appel T212 pour toutes les positions.
+    Retourne None si T212 est inaccessible (distingué d'un portfolio vide → []).
+    """
     data = t212_get("/api/v0/equity/portfolio")
-    if data is _API_ERROR or not data:
+    if data is _API_ERROR:
+        return None  # erreur réseau — ne pas confondre avec portfolio vide
+    if not data:
         return []
     result = []
     for p in data:
@@ -659,6 +676,10 @@ def place_buy_order(symbol: str, amount_eur: float, current_price: float) -> boo
     fx_to_eur = _get_fx_to_eur(ccy)             # 1 ccy = fx_to_eur EUR
     amount_ccy = amount_eur / fx_to_eur          # EUR → devise native de l'actif
     quantity = round(amount_ccy / current_price, 4)
+    if quantity <= 0:
+        logger.error("%s quantité calculée ≤ 0 (%.2f%s / %.4f) — ordre annulé",
+                     symbol, amount_ccy, ccy, current_price)
+        return False
     t212_ticker = ASSETS[symbol]["t212"]
     logger.info("ACHAT %s : body → ticker=%s quantity=%s (%.2f€ → %.2f%s / %.4f)",
                 symbol, t212_ticker, quantity, amount_eur, amount_ccy, ccy, current_price)
@@ -1506,6 +1527,7 @@ def run_strategy() -> None:
     account = get_account()
     if not account:
         logger.error("Impossible de récupérer le compte T212")
+        _send_error_alert("T212 inaccessible (account/cash) — run annulé")
         return
 
     buying_power    = account["buying_power"]
@@ -1514,6 +1536,10 @@ def run_strategy() -> None:
     mode            = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
 
     raw_positions = get_all_positions()
+    if raw_positions is None:
+        logger.error("T212 inaccessible — positions non récupérables, run annulé")
+        _send_error_alert("T212 inaccessible (portfolio) — run annulé pour éviter les achats en double")
+        return
     positions_map = {p["symbol"]: p for p in raw_positions}
     open_count    = sum(1 for sym in ASSETS if sym in positions_map)
 
@@ -1563,11 +1589,13 @@ def daily_summary() -> None:
     - Alerte corrélation portfolio
     """
     account   = get_account()
-    positions = get_all_positions()
+    _positions = get_all_positions()
+    positions  = _positions if _positions is not None else []
     daily     = load_daily_pnl()
     mode      = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
     pnl       = daily.get("pnl", 0.0)
     streak    = record_day_result(pnl)
+    t212_ok   = _positions is not None
 
     lines = [
         f"📊 <b>Résumé {datetime.now(ZoneInfo('Europe/London')).strftime('%d/%m/%Y')}</b> [{mode}]",
@@ -1578,6 +1606,7 @@ def daily_summary() -> None:
         f"{'📈' if pnl >= 0 else '📉'} P&L du jour : <b>{pnl:+.2f} €</b>",
         f"🔄 Trades : {daily.get('trades', 0)}",
         f"{'🏆' if streak > 0 else '💀'} Série gagnante : <b>{streak} jour(s)</b>",
+        "" if t212_ok else "⚠️ T212 inaccessible — positions non récupérées",
         "",
     ]
 

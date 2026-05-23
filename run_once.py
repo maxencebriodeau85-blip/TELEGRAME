@@ -52,6 +52,7 @@ if __name__ == "__main__":
             "first_live_order_done": False,
             "calibration_live_start": None,
             "last_telegram_update_id": 0,
+            "last_error_alert_ts": 0,
         }),
     ]:
         if not path.exists():
@@ -75,10 +76,11 @@ if __name__ == "__main__":
         mode = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
         account = get_account()
         bal = f"{account['portfolio_value']:.2f}€" if account else "N/A"
-        positions = get_all_positions()
+        _positions = get_all_positions()
+        pos_str = f"{len(_positions)}" if _positions is not None else "?"
         send_telegram(
             f"🟢 Marché ouvert — Bot actif {mode}\n"
-            f"Portefeuille : {bal} | Positions : {len(positions)}/{len(ASSETS)} actifs"
+            f"Portefeuille : {bal} | Positions : {pos_str}/{len(ASSETS)} actifs"
         )
         run_strategy()
     else:
