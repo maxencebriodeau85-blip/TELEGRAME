@@ -347,7 +347,8 @@ def send_telegram(text: str) -> None:
     if not TELEGRAM_BOT_TOKEN or not CHAT_ID:
         return
     if len(text) > 4096:
-        text = text[:4080] + "\n<i>[tronqué]</i>"
+        cut = text[:4080].rfind('\n')
+        text = (text[:cut] if cut > 0 else text[:4080]) + "\n<i>[tronqué]</i>"
     for attempt, delay in enumerate([0, 2, 4]):
         if delay:
             time.sleep(delay)
@@ -604,7 +605,7 @@ def t212_post(endpoint: str, body: dict) -> object:
 
 def get_account() -> dict:
     data = t212_get("/api/v0/equity/account/cash")
-    if data is _API_ERROR or not data:
+    if data is _API_ERROR or not data or "total" not in data:
         return {}
     return {
         "portfolio_value": float(data.get("total", 0)),
@@ -676,8 +677,8 @@ def place_buy_order(symbol: str, amount_eur: float, current_price: float) -> boo
     fx_to_eur = _get_fx_to_eur(ccy)             # 1 ccy = fx_to_eur EUR
     amount_ccy = amount_eur / fx_to_eur          # EUR → devise native de l'actif
     quantity = round(amount_ccy / current_price, 4)
-    if quantity <= 0:
-        logger.error("%s quantité calculée ≤ 0 (%.2f%s / %.4f) — ordre annulé",
+    if not (quantity > 0):  # attrape aussi NaN
+        logger.error("%s quantité calculée invalide (%.2f%s / %.4f) — ordre annulé",
                      symbol, amount_ccy, ccy, current_price)
         return False
     t212_ticker = ASSETS[symbol]["t212"]
@@ -705,6 +706,10 @@ def close_position(symbol: str) -> bool:
     if not position:
         return True
     qty = round(position["qty"], 4)
+    if not (qty > 0):
+        logger.warning("close_position %s : qty nulle ou invalide (%.6f) — rien à vendre",
+                       symbol, position["qty"])
+        return True
     result = t212_post("/api/v0/equity/orders/market", {
         "ticker": ASSETS[symbol]["t212"], "quantity": -qty,
     })
@@ -745,6 +750,8 @@ def _get_fx_to_eur(ccy: str) -> float:
         df = yf.Ticker(sym).history(period="2d", interval="1d", auto_adjust=True)
         rate = float(df["Close"].iloc[-1]) if not df.empty else 1.0
     except Exception:
+        rate = 1.0
+    if not (rate > 0):  # protège contre NaN / 0 (division par zéro dans place_buy_order)
         rate = 1.0
     _FX_CACHE[ccy] = rate
     logger.info("FX %s/EUR : %.4f", ccy, rate)
@@ -838,7 +845,8 @@ def calc_atr(df: pd.DataFrame, period: int = 14) -> float:
         (low  - close.shift(1)).abs(),
     ], axis=1).max(axis=1)
     atr = tr.ewm(span=period, adjust=False).mean()
-    return float(atr.iloc[-1]) if not atr.empty else 0.0
+    raw = float(atr.iloc[-1]) if not atr.empty else 0.0
+    return raw if np.isfinite(raw) and raw > 0 else 0.0
 
 
 def get_signals(symbol: str, params_key: str = "commodities") -> Optional[dict]:
@@ -867,6 +875,10 @@ def get_signals(symbol: str, params_key: str = "commodities") -> Optional[dict]:
     )
     atr_val    = calc_atr(df, sizing["atr_period"])
 
+    if len(macd_line.dropna()) < 2 or len(signal_line.dropna()) < 2:
+        logger.warning("%s : MACD insuffisant (données < 2 bougies valides)", symbol)
+        return None
+
     price       = float(close.iloc[-1])
     ema20_now   = float(ema20.iloc[-1])
     ema50_now   = float(ema50.iloc[-1])
@@ -875,6 +887,11 @@ def get_signals(symbol: str, params_key: str = "commodities") -> Optional[dict]:
     signal_now  = float(signal_line.iloc[-1])
     macd_prev   = float(macd_line.iloc[-2])
     signal_prev = float(signal_line.iloc[-2])
+
+    if not all(np.isfinite(v) for v in [price, ema20_now, ema50_now, rsi_now,
+                                         macd_now, signal_now, macd_prev, signal_prev]):
+        logger.warning("%s : indicateur(s) NaN/Inf — données insuffisantes ou corrompues", symbol)
+        return None
 
     trend_bullish   = ema20_now > ema50_now
     trend_bearish   = ema20_now < ema50_now
@@ -953,7 +970,7 @@ def calculate_amount_atr(
     """
     sizing = SIZING_PARAMS[ASSETS[symbol]["params"]]
 
-    if atr <= 0 or current_price <= 0:
+    if not (atr > 0) or not (current_price > 0):  # attrape aussi NaN (NaN > 0 == False)
         return round(min(buying_power * ASSETS[symbol]["pct"] * cal, buying_power), 2)
 
     risk_amount    = portfolio_value * sizing["risk_pct"]
@@ -1201,6 +1218,9 @@ def check_daily_loss_limit() -> bool:
         return False
 
     portfolio_value = account["portfolio_value"]
+    if not (portfolio_value > 0):
+        logger.warning("check_daily_loss_limit : portfolio_value invalide (%.2f) — ignoré", portfolio_value)
+        return False
 
     # ── Drawdown cumulé (LIVE uniquement) ────────────────────────────────
     if not T212_DEMO:
