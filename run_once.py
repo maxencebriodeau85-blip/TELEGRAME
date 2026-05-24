@@ -62,42 +62,48 @@ if __name__ == "__main__":
             save_json(path, default)
     load_daily_pnl()
 
-    # Traiter les commandes Telegram en premier — même si T212 est down
+    # Commandes Telegram en premier — même si T212 est down
     poll_telegram_commands()
-
-    # Vérification connectivité T212 — détecte tôt les API keys incorrectes ou le mauvais mode
-    if not get_account():
-        logger.error(
-            "T212 inaccessible au démarrage (mode=%s) — clés API incorrectes ou service down",
-            "DEMO" if T212_DEMO else "LIVE",
-        )
-        _send_error_alert(
-            f"T212 inaccessible au démarrage (mode {'DEMO' if T212_DEMO else 'LIVE'})\n"
-            "Vérifiez : T212_API_KEY, T212_API_KEY_ID, T212_DEMO"
-        )
-        sys.exit(0)
 
     now_ldn = datetime.now(ZoneInfo("Europe/London"))
 
     if now_ldn.hour == 16 and 30 <= now_ldn.minute < 50:
         # Résumé journalier — fenêtre 16h30–16h49 London (après clôture LSE)
-        # DOIT être testé AVANT is_market_open() car le marché est déjà fermé à 16h31
+        # DOIT être testé AVANT la vérification T212 — daily_summary gère gracieusement
+        # l'absence de données T212 (affiche "⚠️ T212 inaccessible").
         logger.info("Envoi du résumé journalier")
         daily_summary()
+
     elif not is_market_open():
         logger.info("Marché fermé — analyse ignorée")
-    elif now_ldn.hour == 8 and 0 <= now_ldn.minute < 20:
-        # Message d'ouverture — une seule fois à l'ouverture LSE (8h00–8h19 London)
-        mode = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
-        account = get_account()
-        bal = f"{account['portfolio_value']:.2f}€" if account else "N/A"
-        _positions = get_all_positions()
-        pos_str = f"{len(_positions)}" if _positions is not None else "?"
-        send_telegram(
-            f"🟢 Marché ouvert — Bot actif {mode}\n"
-            f"Portefeuille : {bal} | Positions : {pos_str}/{len(ASSETS)} actifs"
-        )
-        run_strategy()
+
     else:
-        # Analyse normale — les trades/SL génèrent leurs propres messages Telegram
-        run_strategy()
+        # Vérification connectivité T212 uniquement pendant les heures de trading.
+        # Utilise sys.exit(1) pour que GitHub Actions marque le run comme échoué
+        # si les clés API sont incorrectes ou le service indisponible.
+        if not get_account():
+            logger.error(
+                "T212 inaccessible (mode=%s) — clés API incorrectes ou service down",
+                "DEMO" if T212_DEMO else "LIVE",
+            )
+            _send_error_alert(
+                f"T212 inaccessible (mode {'DEMO' if T212_DEMO else 'LIVE'})\n"
+                "Vérifiez : T212_API_KEY, T212_API_KEY_ID, T212_DEMO"
+            )
+            sys.exit(1)
+
+        if now_ldn.hour == 8 and 0 <= now_ldn.minute < 20:
+            # Message d'ouverture — une seule fois à l'ouverture LSE (8h00–8h19 London)
+            mode = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
+            account = get_account()
+            bal = f"{account['portfolio_value']:.2f}€" if account else "N/A"
+            _positions = get_all_positions()
+            pos_str = f"{len(_positions)}" if _positions is not None else "?"
+            send_telegram(
+                f"🟢 Marché ouvert — Bot actif {mode}\n"
+                f"Portefeuille : {bal} | Positions : {pos_str}/{len(ASSETS)} actifs"
+            )
+            run_strategy()
+        else:
+            # Analyse normale — les trades/SL génèrent leurs propres messages Telegram
+            run_strategy()

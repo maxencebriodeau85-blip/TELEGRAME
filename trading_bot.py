@@ -492,11 +492,11 @@ def poll_telegram_commands() -> None:
                 logger.info("Bot repris via Telegram")
             elif cmd == "/status":
                 mode = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
-                account = get_account()
-                positions = get_all_positions()
-                daily = load_daily_pnl()
-                bal = f"{account['portfolio_value']:.2f}€" if account else "N/A"
-                pnl = daily.get("pnl", 0.0)
+                account   = get_account()
+                positions = get_all_positions() or []   # None (T212 down) → [] pour len()
+                daily     = load_daily_pnl()
+                bal       = f"{account['portfolio_value']:.2f}€" if account else "N/A"
+                pnl       = daily.get("pnl", 0.0)
                 paused_str = "⏸️ En pause" if ctrl.get("paused") else "▶️ Actif"
                 send_telegram(
                     f"📊 <b>Status Bot {mode}</b>\n"
@@ -1228,9 +1228,9 @@ def check_daily_loss_limit() -> bool:
         return False
 
     portfolio_value = account["portfolio_value"]
-    if not (portfolio_value > 0):
-        logger.warning("check_daily_loss_limit : portfolio_value invalide (%.2f) — ignoré", portfolio_value)
-        return False
+    # Pas de garde portfolio_value <= 0 ici : en mode LIVE un compte à 0 doit
+    # déclencher le circuit breaker (cum_dd -100%). Les gardes start==0 et peak>0
+    # dans les blocs suivants évitent les divisions par zéro.
 
     # ── Drawdown cumulé (LIVE uniquement) ────────────────────────────────
     if not T212_DEMO:
@@ -1630,23 +1630,29 @@ def daily_summary() -> None:
     - Exposition par catégorie
     - Alerte corrélation portfolio
     """
-    account   = get_account()
+    account    = get_account()
+    account_ok = bool(account)            # {} (T212 down) est falsy
     _positions = get_all_positions()
     positions  = _positions if _positions is not None else []
-    daily     = load_daily_pnl()
-    mode      = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
-    pnl       = daily.get("pnl", 0.0)
-    streak    = record_day_result(pnl)
-    t212_ok   = _positions is not None
+    daily      = load_daily_pnl()
+    mode       = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
+    pnl        = daily.get("pnl", 0.0)
+    trades_today = daily.get("trades", 0)
+    # N'enregistrer le résultat que si des trades ont eu lieu — évite de comptabiliser
+    # les jours sans trading (T212 down, pas de signal) comme des jours "profitables"
+    # ce qui gonflerait profitable_weeks et détendrait prématurément le circuit breaker.
+    streak = record_day_result(pnl) if trades_today > 0 else load_risk_stats().get("win_streak", 0)
+    t212_ok = _positions is not None
 
     lines = [
         f"📊 <b>Résumé {datetime.now(ZoneInfo('Europe/London')).strftime('%d/%m/%Y')}</b> [{mode}]",
         "",
-        f"💼 Portfolio : <b>{account.get('portfolio_value', 0):.2f} €</b>",
+        f"💼 Portfolio : <b>{account.get('portfolio_value', 0):.2f} €</b>" + ("" if account_ok else " ⚠️"),
         f"💵 Disponible : {account.get('buying_power', 0):.2f} €",
         f"📈 Investi : {account.get('invested', 0):.2f} €",
+        "" if account_ok else "⚠️ T212 inaccessible — données compte non récupérées",
         f"{'📈' if pnl >= 0 else '📉'} P&L du jour : <b>{pnl:+.2f} €</b>",
-        f"🔄 Trades : {daily.get('trades', 0)}",
+        f"🔄 Trades : {trades_today}" + ("" if trades_today > 0 else " (aucun — journée non comptabilisée)"),
         f"{'🏆' if streak > 0 else '💀'} Série gagnante : <b>{streak} jour(s)</b>",
         "" if t212_ok else "⚠️ T212 inaccessible — positions non récupérées",
         "",
