@@ -360,6 +360,9 @@ def send_telegram(text: str) -> None:
             )
             if resp.ok:
                 return
+            if resp.status_code in (401, 403):
+                logger.error("Telegram auth échec (HTTP %d) — vérifiez TELEGRAM_BOT_TOKEN", resp.status_code)
+                return
             logger.warning("Telegram tentative %d/3 : %s", attempt + 1, resp.text[:100])
         except Exception as e:
             logger.error("Telegram tentative %d/3 : %s", attempt + 1, e)
@@ -1265,8 +1268,9 @@ def check_daily_loss_limit() -> bool:
     # ── Circuit breaker journalier ────────────────────────────────────────
     daily = load_daily_pnl()
     if daily.get("start_value") is None:
-        daily["start_value"] = portfolio_value
-        save_json(DAILY_PNL_FILE, daily)
+        if portfolio_value > 0:
+            daily["start_value"] = portfolio_value
+            save_json(DAILY_PNL_FILE, daily)
         return False
 
     start = daily.get("start_value", 0)
@@ -1617,9 +1621,14 @@ def run_strategy() -> None:
             buying_power, portfolio_value, invested, mode, open_count,
         )
         open_count += delta
-        # Mettre à jour positions_map si un achat vient d'être effectué
         if delta == 1:
             positions_map[symbol] = {"symbol": symbol}
+            # Rafraîchir buying_power et invested — évite que le live_capital_limit
+            # soit contourné si deux achats se déclenchent dans le même run.
+            fresh = get_account()
+            if fresh:
+                buying_power = fresh["buying_power"]
+                invested     = fresh.get("invested", 0)
 
 
 def daily_summary() -> None:
@@ -1746,7 +1755,12 @@ def main() -> None:
     all_files = [
         (TRADES_FILE, []), (DAILY_PNL_FILE, {}),
         (DISABLED_ASSETS_FILE, []), (POSITIONS_META_FILE, {}),
-        (RISK_STATS_FILE, {"win_streak": 0, "last_date": None}),
+        (RISK_STATS_FILE, {
+            "win_streak": 0, "last_date": None,
+            "current_week_pnl": 0.0, "weekly_results": [],
+            "profitable_weeks": 0, "peak_portfolio_value": None,
+            "live_start_date": None,
+        }),
     ]
     for f, default in all_files:
         if not f.exists():
