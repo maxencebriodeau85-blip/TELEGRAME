@@ -408,6 +408,7 @@ def load_bot_control() -> dict:
         "first_live_order_done": False,
         "calibration_live_start": None,
         "last_telegram_update_id": 0,
+        "last_error_alert_ts": 0,
     })
 
 
@@ -522,13 +523,17 @@ def _calibration_factor() -> float:
     ctrl = load_bot_control()
     cal_start = ctrl.get("calibration_live_start")
     if not cal_start:
-        return 0.5  # premier ordre live pas encore passé → sizing minimal par précaution
+        logger.info("Calibration live : aucun trade réel passé → sizing 50%")
+        return 0.5
     try:
         start    = datetime.fromisoformat(cal_start).date()
         cal_days = load_config().get("trading", {}).get("calibration_days", 30)
         days     = (datetime.now(ZoneInfo("Europe/London")).date() - start).days
-        return 0.5 if days < cal_days else 1.0
-    except Exception:
+        factor   = 0.5 if days < cal_days else 1.0
+        logger.info("Calibration live : J+%d/%d → sizing %.0f%%", days, cal_days, factor * 100)
+        return factor
+    except Exception as e:
+        logger.warning("Calibration live : erreur de calcul (%s) → sizing 50% par précaution", e)
         return 0.5
 
 
@@ -555,7 +560,10 @@ def _get_circuit_breaker_pct() -> float:
 
     cfg_weeks        = load_config().get("risk", {}).get("profitable_weeks_to_relax", PROFITABLE_WEEKS_TO_RELAX)
     profitable_weeks = stats.get("profitable_weeks", 0)
-    return CB_NORMAL_PCT if profitable_weeks >= cfg_weeks else CB_PHASE1_PCT
+    pct = CB_NORMAL_PCT if profitable_weeks >= cfg_weeks else CB_PHASE1_PCT
+    logger.info("Circuit breaker actif : -%.0f%% (semaines rentables : %d/%d)",
+                pct * 100, profitable_weeks, cfg_weeks)
+    return pct
 
 
 # ============================================================
@@ -971,7 +979,9 @@ def calculate_amount_atr(
     sizing = SIZING_PARAMS[ASSETS[symbol]["params"]]
 
     if not (atr > 0) or not (current_price > 0):  # attrape aussi NaN (NaN > 0 == False)
-        return round(min(buying_power * ASSETS[symbol]["pct"] * cal, buying_power), 2)
+        fallback = round(min(buying_power * ASSETS[symbol]["pct"] * cal, buying_power), 2)
+        logger.warning("%s : ATR invalide (%.6f) → fallback sizing fixe %.2f€", symbol, atr, fallback)
+        return fallback
 
     risk_amount    = portfolio_value * sizing["risk_pct"]
     stop_distance  = atr * sizing["atr_mult"]
@@ -1381,7 +1391,10 @@ def _execute_buy(
     # ── Garde capital live (mode LIVE uniquement) ──────────────────────────
     if not T212_DEMO:
         cfg        = load_config()
-        live_limit = cfg.get("trading", {}).get("live_capital_limit", 500)
+        live_limit = cfg.get("trading", {}).get("live_capital_limit")
+        if live_limit is None:
+            live_limit = 500
+            logger.warning("live_capital_limit absent de config.yaml — fallback 500€")
         if invested >= live_limit:
             log_decision(symbol, "ACHAT_REJETÉ_LIMITE",
                 f"capital live {live_limit:.0f}€ atteint (investi={invested:.2f}€)", signals)
@@ -1535,6 +1548,15 @@ def run_strategy() -> None:
     ctrl = load_bot_control()
     if ctrl.get("paused"):
         logger.info("Bot en pause (envoyez /resume via Telegram pour reprendre)")
+        return
+
+    # Bloquer TEST_TRADE en mode LIVE — évite des ordres non-signalisés avec argent réel
+    if TEST_TRADE and not T212_DEMO:
+        logger.critical("TEST_TRADE=true en mode LIVE — trading bloqué, incohérence de config")
+        _send_error_alert(
+            "TEST_TRADE=true détecté en mode LIVE\n"
+            "Trading bloqué — désactivez TEST_TRADE dans le workflow pour reprendre."
+        )
         return
 
     if not is_market_open():
@@ -1692,6 +1714,16 @@ def daily_summary() -> None:
     disabled = load_json(DISABLED_ASSETS_FILE, [])
     if disabled:
         lines.append(f"\n⚠️ Actifs désactivés : {', '.join(disabled)}")
+
+    # Paramètres live : calibration + circuit breaker actif
+    if not T212_DEMO:
+        cal_factor = _calibration_factor()
+        cb_pct     = _get_circuit_breaker_pct()
+        lines.append(
+            f"\n🎛 <b>Paramètres live</b>\n"
+            f"Sizing : <b>{'50% (calibration)' if cal_factor < 1.0 else '100% (normal)'}</b> | "
+            f"CB jour : <b>-{cb_pct*100:.0f}%</b>"
+        )
 
     send_telegram("\n".join(lines))
     logger.info("Résumé journalier envoyé")

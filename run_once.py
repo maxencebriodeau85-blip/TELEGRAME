@@ -7,6 +7,8 @@ Exécute la stratégie une fois et quitte — le scheduler est géré par GitHub
 import logging
 from pathlib import Path
 
+import sys
+
 from trading_bot import (
     TRADES_FILE,
     DISABLED_ASSETS_FILE,
@@ -24,6 +26,7 @@ from trading_bot import (
     get_account,
     get_all_positions,
     poll_telegram_commands,
+    _send_error_alert,
 )
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -59,10 +62,22 @@ if __name__ == "__main__":
             save_json(path, default)
     load_daily_pnl()
 
-    now_ldn = datetime.now(ZoneInfo("Europe/London"))
-
-    # Traiter les commandes Telegram (/pause, /resume, /status) à chaque run
+    # Traiter les commandes Telegram en premier — même si T212 est down
     poll_telegram_commands()
+
+    # Vérification connectivité T212 — détecte tôt les API keys incorrectes ou le mauvais mode
+    if not get_account():
+        logger.error(
+            "T212 inaccessible au démarrage (mode=%s) — clés API incorrectes ou service down",
+            "DEMO" if T212_DEMO else "LIVE",
+        )
+        _send_error_alert(
+            f"T212 inaccessible au démarrage (mode {'DEMO' if T212_DEMO else 'LIVE'})\n"
+            "Vérifiez : T212_API_KEY, T212_API_KEY_ID, T212_DEMO"
+        )
+        sys.exit(0)
+
+    now_ldn = datetime.now(ZoneInfo("Europe/London"))
 
     if now_ldn.hour == 16 and 30 <= now_ldn.minute < 50:
         # Résumé journalier — fenêtre 16h30–16h49 London (après clôture LSE)
