@@ -15,6 +15,7 @@ from trading_bot import (
     POSITIONS_META_FILE,
     RISK_STATS_FILE,
     BOT_CONTROL_FILE,
+    DAILY_PNL_FILE,
     ASSETS,
     T212_DEMO,
     load_daily_pnl,
@@ -92,8 +93,11 @@ if __name__ == "__main__":
             )
             sys.exit(1)
 
-        if now_ldn.hour == 8 and 0 <= now_ldn.minute < 20:
-            # Message d'ouverture — une seule fois à l'ouverture LSE (8h00–8h19 London)
+        # Message d'ouverture — premier run du jour pendant les heures de marché.
+        # Déclenché sur flag plutôt que sur fenêtre horaire stricte (8h00-8h19)
+        # pour résister aux retards GitHub Actions.
+        daily = load_daily_pnl()
+        if not daily.get("opening_sent"):
             mode = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
             account = get_account()
             bal = f"{account['portfolio_value']:.2f}€" if account else "N/A"
@@ -103,7 +107,8 @@ if __name__ == "__main__":
                 f"🟢 Marché ouvert — Bot actif {mode}\n"
                 f"Portefeuille : {bal} | Positions : {pos_str}/{len(ASSETS)} actifs"
             )
-            run_strategy()
-        else:
-            # Analyse normale — les trades/SL génèrent leurs propres messages Telegram
-            run_strategy()
+            daily["opening_sent"] = True
+            save_json(DAILY_PNL_FILE, daily)
+            logger.info("Message d'ouverture envoyé")
+
+        run_strategy()

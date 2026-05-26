@@ -228,7 +228,7 @@ def load_daily_pnl() -> dict:
     data  = load_json(DAILY_PNL_FILE, {})
     today = str(datetime.now(ZoneInfo("Europe/London")).date())
     if data.get("date") != today:
-        data = {"date": today, "start_value": None, "trades": 0, "pnl": 0.0}
+        data = {"date": today, "start_value": None, "trades": 0, "pnl": 0.0, "opening_sent": False}
         save_json(DAILY_PNL_FILE, data)
     return data
 
