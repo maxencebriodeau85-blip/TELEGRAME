@@ -68,12 +68,16 @@ if __name__ == "__main__":
 
     now_ldn = datetime.now(ZoneInfo("Europe/London"))
 
-    if now_ldn.hour == 16 and 30 <= now_ldn.minute < 50:
-        # Résumé journalier — fenêtre 16h30–16h49 London (après clôture LSE)
-        # DOIT être testé AVANT la vérification T212 — daily_summary gère gracieusement
-        # l'absence de données T212 (affiche "⚠️ T212 inaccessible").
+    # Résumé journalier : après clôture LSE (16h30 London).
+    # Fenêtre élargie 16h30–19h00 + flag summary_sent pour résister aux retards GitHub Actions.
+    # DOIT être testé AVANT is_market_open — daily_summary gère gracieusement l'absence de T212.
+    daily_check = load_daily_pnl()
+    after_close = (now_ldn.hour == 16 and now_ldn.minute >= 30) or (17 <= now_ldn.hour < 19)
+    if after_close and not daily_check.get("summary_sent"):
         logger.info("Envoi du résumé journalier")
         daily_summary()
+        daily_check["summary_sent"] = True
+        save_json(DAILY_PNL_FILE, daily_check)
 
     elif not is_market_open():
         logger.info("Marché fermé — analyse ignorée")

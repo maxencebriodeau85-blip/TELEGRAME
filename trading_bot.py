@@ -20,7 +20,7 @@ import os
 import time
 import yaml
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -228,7 +228,7 @@ def load_daily_pnl() -> dict:
     data  = load_json(DAILY_PNL_FILE, {})
     today = str(datetime.now(ZoneInfo("Europe/London")).date())
     if data.get("date") != today:
-        data = {"date": today, "start_value": None, "trades": 0, "pnl": 0.0, "opening_sent": False}
+        data = {"date": today, "start_value": None, "trades": 0, "pnl": 0.0, "opening_sent": False, "summary_sent": False}
         save_json(DAILY_PNL_FILE, data)
     return data
 
@@ -733,9 +733,26 @@ def close_position(symbol: str) -> bool:
     return False
 
 
+# Jours fériés UK (LSE fermée) 2025-2027 — à mettre à jour annuellement
+_UK_BANK_HOLIDAYS: frozenset = frozenset({
+    date(2025, 1, 1), date(2025, 4, 18), date(2025, 4, 21),
+    date(2025, 5, 5), date(2025, 5, 26), date(2025, 8, 25),
+    date(2025, 12, 25), date(2025, 12, 26),
+    date(2026, 1, 1), date(2026, 4, 3), date(2026, 4, 6),
+    date(2026, 5, 4), date(2026, 5, 25), date(2026, 8, 31),
+    date(2026, 12, 25), date(2026, 12, 28),
+    date(2027, 1, 1), date(2027, 3, 26), date(2027, 3, 29),
+    date(2027, 5, 3), date(2027, 5, 31), date(2027, 8, 30),
+    date(2027, 12, 27), date(2027, 12, 28),
+})
+
+
 def is_market_open() -> bool:
     now = datetime.now(ZoneInfo("Europe/London"))
     if now.weekday() >= 5:
+        return False
+    if now.date() in _UK_BANK_HOLIDAYS:
+        logger.info("Jour férié UK — LSE fermée")
         return False
     return (
         now.replace(hour=8, minute=0, second=0, microsecond=0)
@@ -1591,6 +1608,16 @@ def run_strategy() -> None:
 
     active_symbols = [sym for sym in ASSETS if not is_asset_disabled(sym)]
     all_signals    = _prefetch_signals(active_symbols)
+
+    # Alerte si yfinance renvoie None pour TOUS les actifs — distingue une panne yfinance
+    # d'un simple "pas de signal" (ce dernier est normal, la panne ne l'est pas).
+    if active_symbols and all(all_signals.get(sym) is None for sym in active_symbols):
+        logger.error("yfinance inaccessible — aucun signal disponible pour %d actifs", len(active_symbols))
+        _send_error_alert(
+            f"yfinance inaccessible — 0/{len(active_symbols)} actifs ont renvoyé des données.\n"
+            "Le run est ignoré jusqu'à la prochaine exécution."
+        )
+        return
 
     # ── Mode TEST_TRADE : forcer un achat de 1€ sur le premier actif sans position ──
     if TEST_TRADE:

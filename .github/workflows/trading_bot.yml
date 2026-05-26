@@ -17,6 +17,12 @@ on:
 permissions:
   contents: write
 
+# Un seul run à la fois — évite les races sur trades.json / daily_pnl.json
+# lors de runs cron successifs ou d'un workflow_dispatch concurrent.
+concurrency:
+  group: trading-bot
+  cancel-in-progress: false
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
