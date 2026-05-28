@@ -1,2 +1,4 @@
 2026-05-21T15:32:32.507364-04:00 | PHAU   | ACHAT_ORDRE              | 2.00€ prix=418.3200$ | RSI=47.7 EMA=↘ MACD=- score=2/5 daily=bearish
 2026-05-22T08:38:24.761891-04:00 | PHAG   | ACHAT_ORDRE              | 2.00€ prix=69.0600$ | RSI=53.0 EMA=↗ MACD=- score=2/5 daily=bearish
+2026-05-28T11:53:16.892980+01:00 | PHAU   | STOP_LOSS                | PL=-0.12€ (-3.4%) seuil=-3%
+2026-05-28T11:53:18.497723+01:00 | PHAG   | STOP_LOSS                | PL=-0.06€ (-3.8%) seuil=-3%

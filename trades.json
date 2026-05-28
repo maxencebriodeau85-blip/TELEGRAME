@@ -22,5 +22,21 @@
     "daily_trend": "bearish",
     "calibration_factor": 1.0,
     "timestamp": "2026-05-22T12:38:24.762554"
+  },
+  {
+    "symbol": "PHAU",
+    "side": "SELL_STOPLOSS",
+    "category": "🪙 Matières premières",
+    "price": 408.32000732421875,
+    "pl": -0.12,
+    "timestamp": "2026-05-28T11:53:17.246322+01:00"
+  },
+  {
+    "symbol": "PHAG",
+    "side": "SELL_STOPLOSS",
+    "category": "🪙 Matières premières",
+    "price": 66.76000213623047,
+    "pl": -0.06,
+    "timestamp": "2026-05-28T11:53:18.905784+01:00"
   }
 ]
