@@ -86,7 +86,8 @@ if __name__ == "__main__":
         # Vérification connectivité T212 uniquement pendant les heures de trading.
         # Utilise sys.exit(1) pour que GitHub Actions marque le run comme échoué
         # si les clés API sont incorrectes ou le service indisponible.
-        if not get_account():
+        account = get_account()
+        if not account:
             logger.error(
                 "T212 inaccessible (mode=%s) — clés API incorrectes ou service down",
                 "DEMO" if T212_DEMO else "LIVE",
@@ -103,8 +104,7 @@ if __name__ == "__main__":
         daily = load_daily_pnl()
         if not daily.get("opening_sent"):
             mode = "🧪 DEMO" if T212_DEMO else "💰 RÉEL"
-            account = get_account()
-            bal = f"{account['portfolio_value']:.2f}€" if account else "N/A"
+            bal = f"{account['portfolio_value']:.2f}€"  # réutilise l'appel déjà fait
             _positions = get_all_positions()
             pos_str = f"{len(_positions)}" if _positions is not None else "?"
             send_telegram(

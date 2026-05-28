@@ -360,8 +360,8 @@ def send_telegram(text: str) -> None:
             )
             if resp.ok:
                 return
-            if resp.status_code in (401, 403):
-                logger.error("Telegram auth échec (HTTP %d) — vérifiez TELEGRAM_BOT_TOKEN", resp.status_code)
+            if resp.status_code == 403:
+                logger.error("Telegram HTTP 403 Forbidden — vérifiez TELEGRAM_BOT_TOKEN")
                 return
             logger.warning("Telegram tentative %d/3 : %s", attempt + 1, resp.text[:100])
         except Exception as e:
@@ -733,7 +733,7 @@ def close_position(symbol: str) -> bool:
     return False
 
 
-# Jours fériés UK (LSE fermée) 2025-2027 — à mettre à jour annuellement
+# Jours fériés UK (LSE fermée) 2025-2028 — à mettre à jour annuellement
 _UK_BANK_HOLIDAYS: frozenset = frozenset({
     date(2025, 1, 1), date(2025, 4, 18), date(2025, 4, 21),
     date(2025, 5, 5), date(2025, 5, 26), date(2025, 8, 25),
@@ -744,14 +744,21 @@ _UK_BANK_HOLIDAYS: frozenset = frozenset({
     date(2027, 1, 1), date(2027, 3, 26), date(2027, 3, 29),
     date(2027, 5, 3), date(2027, 5, 31), date(2027, 8, 30),
     date(2027, 12, 27), date(2027, 12, 28),
+    date(2028, 1, 3), date(2028, 4, 14), date(2028, 4, 17),
+    date(2028, 5, 1), date(2028, 5, 29), date(2028, 8, 26),
+    date(2028, 12, 25), date(2028, 12, 26),
 })
+_HOLIDAY_COVERAGE_END = date(2028, 12, 26)
 
 
 def is_market_open() -> bool:
     now = datetime.now(ZoneInfo("Europe/London"))
     if now.weekday() >= 5:
         return False
-    if now.date() in _UK_BANK_HOLIDAYS:
+    today = now.date()
+    if (today - _HOLIDAY_COVERAGE_END).days > -60:
+        logger.warning("_UK_BANK_HOLIDAYS expire bientôt — mettre à jour la liste pour %d+", today.year)
+    if today in _UK_BANK_HOLIDAYS:
         logger.info("Jour férié UK — LSE fermée")
         return False
     return (
@@ -927,9 +934,11 @@ def get_signals(symbol: str, params_key: str = "commodities") -> Optional[dict]:
     macd_bear_cross = (macd_prev > signal_prev) and (macd_now < signal_now)
     vol_ok          = _volume_ok(df, params["vol_mult"])
 
+    macd_bullish = macd_now > signal_now   # momentum positif (inclut et survit au crossover)
+
     confluence_score = (
         int(trend_bullish)
-        + int(macd_bull_cross)
+        + int(macd_bullish)
         + int(rsi_now < params["rsi_buy"])
         + int(vol_ok)
         + int(daily_trend == "bullish")
@@ -947,6 +956,7 @@ def get_signals(symbol: str, params_key: str = "commodities") -> Optional[dict]:
         "macd":            macd_now,
         "macd_signal":     signal_now,
         "macd_bull_cross": macd_bull_cross,
+        "macd_bullish":    macd_bullish,
         "macd_bear_cross": macd_bear_cross,
         "trend_bullish":   trend_bullish,
         "trend_bearish":   trend_bearish,
@@ -1187,12 +1197,9 @@ def calculate_portfolio_correlation(
 
 def should_buy(signals: dict, has_position: bool, force: bool = False) -> bool:
     """
-    Conditions d'achat (toutes requises) :
-    - EMA20 > EMA50 (tendance 15min haussière)
-    - RSI sous seuil catégorie (48 / 45 / 55)
-    - MACD croisement haussier sur bougie clôturée
-    - Tendance journalière NON baissière (EMA50 daily — gate dur)
-    Note : daily_trend="unknown" (yfinance HS) laisse passer mais logue un avertissement.
+    Conditions d'achat : confluence_score >= 3/5 ET tendance journalière NON baissière.
+    Le score compte : EMA haussière, MACD > signal, RSI < seuil, volume ok, trend daily bullish.
+    Remplace le strict MACD crossover (ponctuel) par le momentum MACD persistant.
     """
     if force:
         return True
@@ -1201,13 +1208,11 @@ def should_buy(signals: dict, has_position: bool, force: bool = False) -> bool:
     if signals["daily_trend"] == "unknown":
         logger.warning(
             "%s : daily_trend=unknown (yfinance HS ou données insuffisantes) — "
-            "achat autorisé mais non confirmé sur le timeframe journalier",
+            "score compté sans confirmation journalière",
             signals["symbol"],
         )
     return (
-        signals["trend_bullish"]
-        and signals["rsi"] <= signals["rsi_buy"]
-        and signals["macd_bull_cross"]
+        signals["confluence_score"] >= 3
         and signals["daily_trend"] != "bearish"
     )
 
@@ -1288,6 +1293,8 @@ def check_daily_loss_limit() -> bool:
         if portfolio_value > 0:
             daily["start_value"] = portfolio_value
             save_json(DAILY_PNL_FILE, daily)
+        else:
+            logger.warning("check_daily_loss_limit: portfolio_value=0 — circuit breaker différé au prochain run")
         return False
 
     start = daily.get("start_value", 0)
