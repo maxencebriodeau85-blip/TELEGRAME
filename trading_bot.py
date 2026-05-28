@@ -1197,9 +1197,12 @@ def calculate_portfolio_correlation(
 
 def should_buy(signals: dict, has_position: bool, force: bool = False) -> bool:
     """
-    Conditions d'achat : confluence_score >= 3/5 ET tendance journalière NON baissière.
-    Le score compte : EMA haussière, MACD > signal, RSI < seuil, volume ok, trend daily bullish.
-    Remplace le strict MACD crossover (ponctuel) par le momentum MACD persistant.
+    Conditions d'achat :
+    - REQUIS : EMA20 > EMA50 (15min haussier — pas d'achat en downtrend)
+    - REQUIS : RSI <= seuil catégorie (pas suracheté)
+    - REQUIS : daily_trend != bearish (gate macro dur)
+    - ASSOUPLISSEMENT : MACD > signal OU volume ok OU daily bullish (1/3 suffit)
+    Remplace le strict crossover MACD (ponctuel) par un momentum persistant + confirmations alternatives.
     """
     if force:
         return True
@@ -1208,12 +1211,20 @@ def should_buy(signals: dict, has_position: bool, force: bool = False) -> bool:
     if signals["daily_trend"] == "unknown":
         logger.warning(
             "%s : daily_trend=unknown (yfinance HS ou données insuffisantes) — "
-            "score compté sans confirmation journalière",
+            "achat autorisé mais non confirmé sur le timeframe journalier",
             signals["symbol"],
         )
+    # Les 3 conditions dures + au moins 1 confirmation supplémentaire
+    extra = (
+        int(signals["macd_bullish"])
+        + int(signals["volume_ok"])
+        + int(signals["daily_trend"] == "bullish")
+    )
     return (
-        signals["confluence_score"] >= 3
+        signals["trend_bullish"]
+        and signals["rsi"] <= signals["rsi_buy"]
         and signals["daily_trend"] != "bearish"
+        and extra >= 1
     )
 
 
