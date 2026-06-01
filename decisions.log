@@ -5,3 +5,5 @@
 2026-06-01T13:31:45.280765+01:00 | EQQQ   | ACHAT_ORDRE              | 7499.97€ prix=55151.5000$ | RSI=44.3 EMA=↗ MACD=- score=4/5 daily=bullish
 2026-06-01T13:31:45.913810+01:00 | XNAS   | ACHAT_REJETÉ_CORR        | corrélation élevée avec EQQQ (déjà en position) | RSI=45.9 EMA=↗ MACD=- score=4/5 daily=bullish
 2026-06-01T13:32:00.551493+01:00 | IWDA   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=46.8 EMA=↗ MACD=- score=3/5 daily=bullish
+2026-06-01T13:39:39.557050+01:00 | XNAS   | ACHAT_REJETÉ_CORR        | corrélation élevée avec EQQQ (déjà en position) | RSI=45.9 EMA=↗ MACD=- score=4/5 daily=bullish
+2026-06-01T13:39:56.027825+01:00 | IWDA   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=46.8 EMA=↗ MACD=- score=3/5 daily=bullish
