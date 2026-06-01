@@ -35,6 +35,19 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: claude/telegram-investbot-zJXWJ
+          fetch-depth: 0
+
+      - name: Restaurer l'état bot (protège contre les pushs de code avec fichiers périmés)
+        run: |
+          # Pour chaque fichier d'état, restaurer depuis le dernier commit qui le modifie.
+          # Empêche qu'un push de code écrase daily_pnl.json avec une date ancienne
+          # et déclenche un faux "marché ouvert" en milieu de journée.
+          for f in daily_pnl.json trades.json disabled_assets.json positions_meta.json risk_stats.json bot_control.json decisions.log; do
+            last=$(git log --oneline -1 -- "$f" 2>/dev/null | cut -d' ' -f1)
+            if [ -n "$last" ]; then
+              git show "$last:$f" > "$f" 2>/dev/null || true
+            fi
+          done
 
       - name: Installation Python 3.11
         uses: actions/setup-python@v5
