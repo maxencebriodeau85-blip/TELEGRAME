@@ -9,3 +9,6 @@
 2026-06-01T13:39:56.027825+01:00 | IWDA   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=46.8 EMA=↗ MACD=- score=3/5 daily=bullish
 2026-06-01T13:44:36.690265+01:00 | XNAS   | ACHAT_REJETÉ_CORR        | corrélation élevée avec EQQQ (déjà en position) | RSI=45.9 EMA=↗ MACD=- score=4/5 daily=bullish
 2026-06-01T13:44:52.849237+01:00 | IWDA   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=46.8 EMA=↗ MACD=- score=3/5 daily=bullish
+2026-06-01T13:51:16.529915+01:00 | XNAS   | ACHAT_REJETÉ_CORR        | corrélation élevée avec EQQQ (déjà en position) | RSI=50.0 EMA=↗ MACD=- score=4/5 daily=bullish
+2026-06-01T13:51:23.929965+01:00 | IUSA   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=49.3 EMA=↗ MACD=- score=3/5 daily=bullish
+2026-06-01T13:51:23.930179+01:00 | IWDA   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=49.4 EMA=↗ MACD=- score=3/5 daily=bullish
