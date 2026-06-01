@@ -117,11 +117,11 @@ ASSETS: dict[str, dict] = {
     "PHAG": {"t212": "PHAGl_EQ", "yf": "PHAG.L", "ccy": "£", "category": "🪙 Matières premières", "stop": 0.03, "pct": 0.15, "params": "commodities"},
     "CRUD": {"t212": "CRUDl_EQ", "yf": "CRUD.L", "ccy": "£", "category": "🪙 Matières premières", "stop": 0.04, "pct": 0.12, "params": "commodities"},
     "NGAS": {"t212": "NGASl_EQ", "yf": "NGAS.L", "ccy": "£", "category": "🪙 Matières premières", "stop": 0.05, "pct": 0.10, "params": "commodities"},
-    # Actions — ETFs indiciels UCITS (LSE, prix en USD ou GBP selon ETF)
-    "IUSA": {"t212": "IUSAl_EQ", "yf": "IUSA.L", "ccy": "$", "category": "📈 Actions",            "stop": 0.03, "pct": 0.15, "params": "equity"},
-    "EQQQ": {"t212": "EQQQl_EQ", "yf": "EQQQ.L", "ccy": "$", "category": "📈 Actions",            "stop": 0.04, "pct": 0.12, "params": "equity"},
-    "IWDA": {"t212": "IWDAl_EQ", "yf": "IWDA.L", "ccy": "$", "category": "📈 Actions",            "stop": 0.03, "pct": 0.12, "params": "equity"},
-    "XNAS": {"t212": "XNASl_EQ", "yf": "XNAS.L", "ccy": "$", "category": "📈 Actions",            "stop": 0.04, "pct": 0.10, "params": "equity"},
+    # Actions — ETFs indiciels UCITS (LSE, prix retournés en GBX=pence par yfinance)
+    "IUSA": {"t212": "IUSAl_EQ", "yf": "IUSA.L", "ccy": "£", "category": "📈 Actions",            "stop": 0.03, "pct": 0.15, "params": "equity"},
+    "EQQQ": {"t212": "EQQQl_EQ", "yf": "EQQQ.L", "ccy": "£", "category": "📈 Actions",            "stop": 0.04, "pct": 0.12, "params": "equity"},
+    "IWDA": {"t212": "IWDAl_EQ", "yf": "IWDA.L", "ccy": "£", "category": "📈 Actions",            "stop": 0.03, "pct": 0.12, "params": "equity"},
+    "XNAS": {"t212": "XNASl_EQ", "yf": "XNAS.L", "ccy": "£", "category": "📈 Actions",            "stop": 0.04, "pct": 0.10, "params": "equity"},
     # Crypto — ETPs physiques UCITS (Xetra EUR / LSE USD)
     "BTCE": {"t212": "BTCEd_EQ", "yf": "BTCE.DE", "ccy": "€", "category": "₿ Crypto",             "stop": 0.07, "pct": 0.08, "params": "crypto"},
     "ETHE": {"t212": "ZETHd_EQ", "yf": "ZETH.DE",  "ccy": "€", "category": "₿ Crypto",             "stop": 0.08, "pct": 0.08, "params": "crypto"},
@@ -797,6 +797,19 @@ def _get_fx_to_eur(ccy: str) -> float:
 # SECTION 4 — ANALYSE TECHNIQUE
 # ============================================================
 
+def _gbx_to_gbp(ticker: "yf.Ticker", df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+    """Si yfinance renvoie les prix en pence sterling (GBp), divise OHLC par 100 → GBP."""
+    try:
+        if ticker.fast_info.currency == "GBp":
+            for col in ("Open", "High", "Low", "Close"):
+                if col in df.columns:
+                    df[col] = df[col] / 100
+            logger.info("%s : prix convertis GBX→GBP (÷100)", symbol)
+    except Exception:
+        pass
+    return df
+
+
 def fetch_ohlcv(symbol: str) -> Optional[pd.DataFrame]:
     try:
         yf_sym = ASSETS[symbol]["yf"]
@@ -805,7 +818,7 @@ def fetch_ohlcv(symbol: str) -> Optional[pd.DataFrame]:
         if df.empty or len(df) < EMA_LONG + 1:
             logger.warning("%s : données insuffisantes (%d barres)", symbol, len(df))
             return None
-        return df
+        return _gbx_to_gbp(ticker, df, symbol)
     except Exception as e:
         logger.error("fetch_ohlcv %s : %s", symbol, e)
         return None
@@ -819,6 +832,7 @@ def _fetch_daily_trend(symbol: str) -> str:
         df = ticker.history(period=DAILY_PERIOD, interval="1d", auto_adjust=True)
         if df is None or df.empty or len(df) < 50:
             return "unknown"
+        df = _gbx_to_gbp(ticker, df, symbol)
         close = df["Close"].squeeze()
         return "bullish" if float(close.iloc[-1]) > float(
             close.ewm(span=50, adjust=False).mean().iloc[-1]
@@ -1449,7 +1463,8 @@ def _execute_buy(
             symbol, buying_power, portfolio_value, signals["atr"], signals["price"], cal=cal
         )
     if place_buy_order(symbol, amount, signals["price"]):
-        qty_approx  = amount / signals["price"]
+        fx          = _get_fx_to_eur(ASSETS[symbol]["ccy"])
+        qty_approx  = amount / (signals["price"] * fx) if fx > 0 else 0
         daily_emoji = {"bullish": "🌞", "bearish": "🌧️", "unknown": "❓"}.get(
             signals["daily_trend"], "❓"
         )
