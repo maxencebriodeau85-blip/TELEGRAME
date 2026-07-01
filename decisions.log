@@ -18,3 +18,5 @@
 2026-06-12T15:10:30.514258+01:00 | XNAS   | ACHAT_REJETÉ_CORR        | limite 2 positions pour 📈 Actions | RSI=43.9 EMA=↗ MACD=- score=4/5 daily=bullish
 2026-06-19T12:15:45.790752+01:00 | EQQQ   | ACHAT_REJETÉ_CORR        | limite 2 positions pour 📈 Actions | RSI=48.6 EMA=↗ MACD=- score=3/5 daily=bullish
 2026-06-19T12:15:45.791049+01:00 | XNAS   | ACHAT_REJETÉ_CORR        | limite 2 positions pour 📈 Actions | RSI=46.9 EMA=↗ MACD=- score=3/5 daily=bullish
+2026-07-01T14:21:46.689047+01:00 | EQQQ   | ACHAT_ORDRE              | 7511.45€ prix=554.2506£ | RSI=45.7 EMA=↗ MACD=- score=4/5 daily=bullish
+2026-07-01T14:21:47.279100+01:00 | XNAS   | ACHAT_REJETÉ_CORR        | corrélation élevée avec EQQQ (déjà en position) | RSI=44.5 EMA=↗ MACD=- score=4/5 daily=bullish

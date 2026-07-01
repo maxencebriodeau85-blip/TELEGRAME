@@ -70,5 +70,17 @@
     "price": 524.42,
     "pl": -4.5,
     "timestamp": "2026-06-10T11:51:34.685496+01:00"
+  },
+  {
+    "symbol": "EQQQ",
+    "side": "BUY",
+    "category": "📈 Actions",
+    "price": 554.2505859375,
+    "amount_eur": 7511.45,
+    "atr": 0.9608169506867075,
+    "confluence_score": 4,
+    "daily_trend": "bullish",
+    "calibration_factor": 1.0,
+    "timestamp": "2026-07-01T14:21:46.689658+01:00"
   }
 ]
