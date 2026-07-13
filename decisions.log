@@ -24,3 +24,4 @@
 2026-07-10T16:17:47.702915+01:00 | EQQQ   | ACHAT_ORDRE              | 7460.50€ prix=539.6700£ | RSI=47.9 EMA=↗ MACD=- score=5/5 daily=bullish
 2026-07-10T16:17:48.314853+01:00 | IUSA   | ACHAT_REJETÉ_CORR        | limite 2 positions pour 📈 Actions | RSI=48.8 EMA=↗ MACD=↘ score=3/5 daily=bullish
 2026-07-13T11:17:52.053394+01:00 | XNAS   | ACHAT_REJETÉ_CORR        | corrélation élevée avec EQQQ (déjà en position) | RSI=49.9 EMA=↗ MACD=↗ score=4/5 daily=bullish
+2026-07-13T13:42:45.956385+01:00 | XNAS   | ACHAT_REJETÉ_CORR        | corrélation élevée avec EQQQ (déjà en position) | RSI=45.7 EMA=↗ MACD=- score=4/5 daily=bullish
