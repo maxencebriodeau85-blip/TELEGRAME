@@ -102,5 +102,25 @@
     "daily_trend": "bullish",
     "calibration_factor": 1.0,
     "timestamp": "2026-07-10T16:17:47.703558+01:00"
+  },
+  {
+    "symbol": "EQQQ",
+    "side": "SELL_STOPLOSS",
+    "category": "📈 Actions",
+    "price": 516.52,
+    "pl": -326.57,
+    "timestamp": "2026-07-17T10:04:46.239194+01:00"
+  },
+  {
+    "symbol": "CRUD",
+    "side": "BUY",
+    "category": "🪙 Matières premières",
+    "price": 14.107000350952148,
+    "amount_eur": 7398.64,
+    "atr": 0.033921735086279,
+    "confluence_score": 3,
+    "daily_trend": "bullish",
+    "calibration_factor": 1.0,
+    "timestamp": "2026-07-17T10:04:48.298809+01:00"
   }
 ]
