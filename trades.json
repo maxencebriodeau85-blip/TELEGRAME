@@ -122,5 +122,17 @@
     "daily_trend": "bullish",
     "calibration_factor": 1.0,
     "timestamp": "2026-07-17T10:04:48.298809+01:00"
+  },
+  {
+    "symbol": "ETHE",
+    "side": "BUY",
+    "category": "₿ Crypto",
+    "price": 15.0,
+    "amount_eur": 3955.11,
+    "atr": 0.07728329617224516,
+    "confluence_score": 4,
+    "daily_trend": "bullish",
+    "calibration_factor": 1.0,
+    "timestamp": "2026-07-20T15:34:38.436355+01:00"
   }
 ]
