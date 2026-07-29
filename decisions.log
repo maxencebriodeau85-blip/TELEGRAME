@@ -34,3 +34,4 @@
 2026-07-20T15:34:38.435628+01:00 | ETHE   | ACHAT_ORDRE              | 3955.11€ prix=15.0000€ | RSI=52.2 EMA=↗ MACD=- score=4/5 daily=bullish
 2026-07-22T13:54:36.626586+01:00 | IUSA   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=47.1 EMA=↗ MACD=- score=4/5 daily=bullish
 2026-07-27T14:27:01.482058+01:00 | CRUD   | TRAILING_STOP            | PL=+163.31€ (+2.4%) max=15.3270 stop=14.7139
+2026-07-29T16:28:12.915017+01:00 | ETHE   | VENTE_SIGNAL             | PL=+61.96€ (+1.6%) | RSI=41.5 EMA=↘ MACD=↘ score=3/5 daily=bullish

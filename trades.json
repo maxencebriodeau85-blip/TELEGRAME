@@ -144,5 +144,14 @@
     "max_price": 15.327,
     "stop_price": 14.71392,
     "timestamp": "2026-07-27T14:27:01.834371+01:00"
+  },
+  {
+    "symbol": "ETHE",
+    "side": "SELL",
+    "category": "₿ Crypto",
+    "price": 15.33899974822998,
+    "pl": 61.96,
+    "reason": "EMA20↘EMA50 + MACD↘",
+    "timestamp": "2026-07-29T16:28:13.562811+01:00"
   }
 ]
