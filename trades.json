@@ -153,5 +153,17 @@
     "pl": 61.96,
     "reason": "EMA20↘EMA50 + MACD↘",
     "timestamp": "2026-07-29T16:28:13.562811+01:00"
+  },
+  {
+    "symbol": "CRUD",
+    "side": "BUY",
+    "category": "🪙 Matières premières",
+    "price": 14.413000106811523,
+    "amount_eur": 7422.96,
+    "atr": 0.04977778396540556,
+    "confluence_score": 3,
+    "daily_trend": "bullish",
+    "calibration_factor": 1.0,
+    "timestamp": "2026-07-30T14:06:03.043703+01:00"
   }
 ]
