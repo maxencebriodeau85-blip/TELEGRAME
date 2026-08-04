@@ -165,5 +165,14 @@
     "daily_trend": "bullish",
     "calibration_factor": 1.0,
     "timestamp": "2026-07-30T14:06:03.043703+01:00"
+  },
+  {
+    "symbol": "CRUD",
+    "side": "SELL",
+    "category": "🪙 Matières premières",
+    "price": 14.220999717712402,
+    "pl": -92.12,
+    "reason": "RSI=71.6 + EMA20↘EMA50",
+    "timestamp": "2026-08-04T10:35:07.153528+01:00"
   }
 ]

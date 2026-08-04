@@ -36,3 +36,4 @@
 2026-07-27T14:27:01.482058+01:00 | CRUD   | TRAILING_STOP            | PL=+163.31€ (+2.4%) max=15.3270 stop=14.7139
 2026-07-29T16:28:12.915017+01:00 | ETHE   | VENTE_SIGNAL             | PL=+61.96€ (+1.6%) | RSI=41.5 EMA=↘ MACD=↘ score=3/5 daily=bullish
 2026-07-30T14:06:03.043023+01:00 | CRUD   | ACHAT_ORDRE              | 7422.96€ prix=14.4130£ | RSI=47.2 EMA=↗ MACD=- score=3/5 daily=bullish
+2026-08-04T10:35:06.584467+01:00 | CRUD   | VENTE_SIGNAL             | PL=-92.12€ (-1.3%) | RSI=71.6 EMA=↘ MACD=- score=1/5 daily=bearish
