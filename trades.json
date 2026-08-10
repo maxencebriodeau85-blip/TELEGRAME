@@ -174,5 +174,17 @@
     "pl": -92.12,
     "reason": "RSI=71.6 + EMA20↘EMA50",
     "timestamp": "2026-08-04T10:35:07.153528+01:00"
+  },
+  {
+    "symbol": "ETHE",
+    "side": "BUY",
+    "category": "₿ Crypto",
+    "price": 15.267999649047852,
+    "amount_eur": 3967.13,
+    "atr": 0.027724228392832177,
+    "confluence_score": 3,
+    "daily_trend": "bullish",
+    "calibration_factor": 1.0,
+    "timestamp": "2026-08-10T12:00:49.820421+01:00"
   }
 ]
