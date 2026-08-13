@@ -198,5 +198,14 @@
     "daily_trend": "bullish",
     "calibration_factor": 1.0,
     "timestamp": "2026-08-10T12:55:59.740099+01:00"
+  },
+  {
+    "symbol": "ETHE",
+    "side": "SELL",
+    "category": "₿ Crypto",
+    "price": 15.043999671936035,
+    "pl": -76.39,
+    "reason": "EMA20↘EMA50 + MACD↘",
+    "timestamp": "2026-08-13T12:26:34.800234+01:00"
   }
 ]
