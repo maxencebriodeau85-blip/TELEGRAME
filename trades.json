@@ -207,5 +207,17 @@
     "pl": -76.39,
     "reason": "EMA20↘EMA50 + MACD↘",
     "timestamp": "2026-08-13T12:26:34.800234+01:00"
+  },
+  {
+    "symbol": "EQQQ",
+    "side": "BUY",
+    "category": "📈 Actions",
+    "price": 543.92,
+    "amount_eur": 7435.19,
+    "atr": 0.8112218051646765,
+    "confluence_score": 4,
+    "daily_trend": "bullish",
+    "calibration_factor": 1.0,
+    "timestamp": "2026-08-14T15:19:36.745306+01:00"
   }
 ]
