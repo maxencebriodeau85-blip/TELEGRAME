@@ -72,3 +72,5 @@
 2026-08-14T16:10:16.499155+01:00 | XNAS   | ACHAT_REJETÉ_CORR        | corrélation élevée avec EQQQ (déjà en position) | RSI=45.8 EMA=↗ MACD=- score=3/5 daily=bullish
 2026-08-17T14:02:27.516175+01:00 | XNAS   | ACHAT_REJETÉ_CORR        | corrélation élevée avec EQQQ (déjà en position) | RSI=45.7 EMA=↗ MACD=- score=4/5 daily=bullish
 2026-08-17T14:02:28.678971+01:00 | PHAU   | ACHAT_ORDRE              | 7428.91€ prix=406.3200£ | RSI=42.2 EMA=↗ MACD=- score=3/5 daily=bullish
+2026-08-17T14:49:08.681224+01:00 | PHAG   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=47.0 EMA=↗ MACD=- score=4/5 daily=bullish
+2026-08-17T14:49:08.681485+01:00 | XNAS   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=46.4 EMA=↗ MACD=- score=3/5 daily=bullish
