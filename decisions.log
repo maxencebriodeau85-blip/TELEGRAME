@@ -74,3 +74,4 @@
 2026-08-17T14:02:28.678971+01:00 | PHAU   | ACHAT_ORDRE              | 7428.91€ prix=406.3200£ | RSI=42.2 EMA=↗ MACD=- score=3/5 daily=bullish
 2026-08-17T14:49:08.681224+01:00 | PHAG   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=47.0 EMA=↗ MACD=- score=4/5 daily=bullish
 2026-08-17T14:49:08.681485+01:00 | XNAS   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=46.4 EMA=↗ MACD=- score=3/5 daily=bullish
+2026-08-17T15:12:44.229965+01:00 | XNAS   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=41.6 EMA=↗ MACD=- score=4/5 daily=bullish
