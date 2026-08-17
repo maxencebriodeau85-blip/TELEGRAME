@@ -1,8 +1,8 @@
 {
-  "date": "2026-08-14",
-  "start_value": 49577.93,
+  "date": "2026-08-17",
+  "start_value": 49550.89,
   "trades": 0,
   "pnl": 0.0,
   "opening_sent": true,
-  "summary_sent": true
+  "summary_sent": false
 }
