@@ -231,5 +231,14 @@
     "daily_trend": "bullish",
     "calibration_factor": 1.0,
     "timestamp": "2026-08-17T14:02:28.679690+01:00"
+  },
+  {
+    "symbol": "EQQQ",
+    "side": "SELL",
+    "category": "📈 Actions",
+    "price": 538.34,
+    "pl": -73.14,
+    "reason": "EMA20↘EMA50 + MACD↘",
+    "timestamp": "2026-08-18T08:31:34.729372+01:00"
   }
 ]
