@@ -240,5 +240,23 @@
     "pl": -73.14,
     "reason": "EMA20↘EMA50 + MACD↘",
     "timestamp": "2026-08-18T08:31:34.729372+01:00"
+  },
+  {
+    "symbol": "PHAU",
+    "side": "SELL",
+    "category": "🪙 Matières premières",
+    "price": 408.94000244140625,
+    "pl": 35.33,
+    "reason": "RSI=69.7 + EMA20↘EMA50",
+    "timestamp": "2026-08-19T14:04:54.264956+01:00"
+  },
+  {
+    "symbol": "IWDA",
+    "side": "SELL",
+    "category": "📈 Actions",
+    "price": 148.0399932861328,
+    "pl": 169.72,
+    "reason": "RSI=72.5 + EMA20↘EMA50",
+    "timestamp": "2026-08-19T14:04:56.103613+01:00"
   }
 ]
