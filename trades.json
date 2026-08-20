@@ -258,5 +258,17 @@
     "pl": 169.72,
     "reason": "RSI=72.5 + EMA20↘EMA50",
     "timestamp": "2026-08-19T14:04:56.103613+01:00"
+  },
+  {
+    "symbol": "IWDA",
+    "side": "BUY",
+    "category": "📈 Actions",
+    "price": 147.77000427246094,
+    "amount_eur": 7407.42,
+    "atr": 0.16561671978574574,
+    "confluence_score": 3,
+    "daily_trend": "bullish",
+    "calibration_factor": 1.0,
+    "timestamp": "2026-08-20T09:53:18.837199+01:00"
   }
 ]
