@@ -270,5 +270,17 @@
     "daily_trend": "bullish",
     "calibration_factor": 1.0,
     "timestamp": "2026-08-20T09:53:18.837199+01:00"
+  },
+  {
+    "symbol": "PHAU",
+    "side": "BUY",
+    "category": "🪙 Matières premières",
+    "price": 414.0,
+    "amount_eur": 7402.72,
+    "atr": 0.7316040577467228,
+    "confluence_score": 3,
+    "daily_trend": "bullish",
+    "calibration_factor": 1.0,
+    "timestamp": "2026-08-20T13:44:09.037208+01:00"
   }
 ]

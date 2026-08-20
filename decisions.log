@@ -84,3 +84,4 @@
 2026-08-19T14:04:53.753895+01:00 | PHAU   | VENTE_SIGNAL             | PL=+35.33€ (+1.1%) | RSI=69.7 EMA=↘ MACD=- score=3/5 daily=bullish
 2026-08-19T14:04:55.598694+01:00 | IWDA   | VENTE_SIGNAL             | PL=+169.72€ (+3.6%) | RSI=72.5 EMA=↘ MACD=- score=3/5 daily=bullish
 2026-08-20T09:53:18.757706+01:00 | IWDA   | ACHAT_ORDRE              | 7407.42€ prix=147.7700£ | RSI=43.1 EMA=↗ MACD=- score=3/5 daily=bullish
+2026-08-20T13:44:09.036545+01:00 | PHAU   | ACHAT_ORDRE              | 7402.72€ prix=414.0000£ | RSI=46.8 EMA=↗ MACD=- score=3/5 daily=bullish
