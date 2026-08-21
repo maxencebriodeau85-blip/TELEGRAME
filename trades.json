@@ -282,5 +282,14 @@
     "daily_trend": "bullish",
     "calibration_factor": 1.0,
     "timestamp": "2026-08-20T13:44:09.037208+01:00"
+  },
+  {
+    "symbol": "PHAU",
+    "side": "SELL",
+    "category": "🪙 Matières premières",
+    "price": 425.5,
+    "pl": 159.87,
+    "reason": "RSI=71.6 + MACD↘",
+    "timestamp": "2026-08-21T12:44:10.718388+01:00"
   }
 ]
