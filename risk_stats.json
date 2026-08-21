@@ -1,14 +1,18 @@
 {
-  "win_streak": 1,
-  "last_date": "2026-08-19",
-  "current_week_pnl": 188.67000000000002,
+  "win_streak": 2,
+  "last_date": "2026-08-21",
+  "current_week_pnl": 0.0,
   "weekly_results": [
     {
       "date": "2026-07-17",
       "pnl": -682.17
+    },
+    {
+      "date": "2026-08-21",
+      "pnl": 348.54
     }
   ],
-  "profitable_weeks": 0,
+  "profitable_weeks": 1,
   "peak_portfolio_value": null,
   "live_start_date": null
 }
