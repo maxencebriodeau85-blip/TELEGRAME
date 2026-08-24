@@ -291,5 +291,17 @@
     "pl": 159.87,
     "reason": "RSI=71.6 + MACD↘",
     "timestamp": "2026-08-21T12:44:10.718388+01:00"
+  },
+  {
+    "symbol": "CRUD",
+    "side": "BUY",
+    "category": "🪙 Matières premières",
+    "price": 15.295999526977539,
+    "amount_eur": 7426.9,
+    "atr": 0.06096279002478667,
+    "confluence_score": 3,
+    "daily_trend": "bullish",
+    "calibration_factor": 1.0,
+    "timestamp": "2026-08-24T09:39:00.877597+01:00"
   }
 ]
