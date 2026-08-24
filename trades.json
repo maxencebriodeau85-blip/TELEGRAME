@@ -303,5 +303,14 @@
     "daily_trend": "bullish",
     "calibration_factor": 1.0,
     "timestamp": "2026-08-24T09:39:00.877597+01:00"
+  },
+  {
+    "symbol": "IWDA",
+    "side": "SELL",
+    "category": "📈 Actions",
+    "price": 147.27999877929688,
+    "pl": -3.54,
+    "reason": "EMA20↘EMA50 + MACD↘",
+    "timestamp": "2026-08-24T12:20:06.376670+01:00"
   }
 ]
