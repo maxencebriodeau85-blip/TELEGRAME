@@ -87,3 +87,4 @@
 2026-08-20T13:44:09.036545+01:00 | PHAU   | ACHAT_ORDRE              | 7402.72€ prix=414.0000£ | RSI=46.8 EMA=↗ MACD=- score=3/5 daily=bullish
 2026-08-21T12:44:10.219576+01:00 | PHAU   | VENTE_SIGNAL             | PL=+159.87€ (+3.0%) | RSI=71.6 EMA=↗ MACD=↘ score=2/5 daily=bullish
 2026-08-24T09:39:00.876913+01:00 | CRUD   | ACHAT_ORDRE              | 7426.90€ prix=15.2960£ | RSI=39.4 EMA=↗ MACD=- score=3/5 daily=bullish
+2026-08-24T10:28:40.567536+01:00 | BTCE   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=52.8 EMA=↗ MACD=- score=3/5 daily=bullish
