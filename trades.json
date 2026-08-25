@@ -312,5 +312,17 @@
     "pl": -3.54,
     "reason": "EMA20↘EMA50 + MACD↘",
     "timestamp": "2026-08-24T12:20:06.376670+01:00"
+  },
+  {
+    "symbol": "PHAU",
+    "side": "BUY",
+    "category": "🪙 Matières premières",
+    "price": 430.1600036621094,
+    "amount_eur": 7410.74,
+    "atr": 1.1217959955345462,
+    "confluence_score": 3,
+    "daily_trend": "bullish",
+    "calibration_factor": 1.0,
+    "timestamp": "2026-08-25T08:37:45.975787+01:00"
   }
 ]
