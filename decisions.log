@@ -93,3 +93,4 @@
 2026-08-25T08:37:46.645167+01:00 | PHAG   | ACHAT_REJETÉ_CORR        | corrélation élevée avec PHAU (déjà en position) | RSI=45.7 EMA=↗ MACD=- score=3/5 daily=bullish
 2026-08-25T09:21:22.514885+01:00 | PHAG   | ACHAT_REJETÉ_CORR        | corrélation élevée avec PHAU (déjà en position) | RSI=34.1 EMA=↗ MACD=- score=3/5 daily=bullish
 2026-08-25T10:47:52.342967+01:00 | ETHE   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=46.5 EMA=↗ MACD=- score=3/5 daily=bullish
+2026-08-25T11:51:34.879486+01:00 | ETHE   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=48.8 EMA=↗ MACD=- score=3/5 daily=bullish
