@@ -324,5 +324,17 @@
     "daily_trend": "bullish",
     "calibration_factor": 1.0,
     "timestamp": "2026-08-25T08:37:45.975787+01:00"
+  },
+  {
+    "symbol": "IWDA",
+    "side": "BUY",
+    "category": "📈 Actions",
+    "price": 147.72000122070312,
+    "amount_eur": 7396.9,
+    "atr": 0.09857418814664196,
+    "confluence_score": 4,
+    "daily_trend": "bullish",
+    "calibration_factor": 1.0,
+    "timestamp": "2026-08-25T15:06:05.772043+01:00"
   }
 ]
