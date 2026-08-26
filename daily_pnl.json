@@ -4,5 +4,5 @@
   "trades": 2,
   "pnl": -300.16,
   "opening_sent": true,
-  "summary_sent": false
+  "summary_sent": true
 }
