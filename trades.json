@@ -336,5 +336,13 @@
     "daily_trend": "bullish",
     "calibration_factor": 1.0,
     "timestamp": "2026-08-25T15:06:05.772043+01:00"
+  },
+  {
+    "symbol": "CRUD",
+    "side": "SELL_STOPLOSS",
+    "category": "🪙 Matières premières",
+    "price": 14.583000183105469,
+    "pl": -274.42,
+    "timestamp": "2026-08-26T08:39:42.448427+01:00"
   }
 ]
