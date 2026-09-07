@@ -113,3 +113,5 @@
 2026-08-26T12:39:16.803973+01:00 | PHAU   | VENTE_SIGNAL             | PL=-25.74€ (-0.4%) | RSI=42.5 EMA=↘ MACD=↘ score=2/5 daily=bullish
 2026-08-26T12:39:25.101954+01:00 | BTCE   | ACHAT_REJETÉ_CORR        | corrélation élevée avec ETHE (déjà en position) | RSI=45.1 EMA=↗ MACD=- score=3/5 daily=bullish
 2026-08-26T13:00:59.042441+01:00 | BTCE   | ACHAT_REJETÉ_CORR        | corrélation élevée avec ETHE (déjà en position) | RSI=44.0 EMA=↗ MACD=↗ score=4/5 daily=bullish
+2026-09-07T14:11:21.602060+01:00 | EQQQ   | ACHAT_ORDRE              | 7379.02€ prix=533.3300£ | RSI=40.7 EMA=↗ MACD=- score=3/5 daily=bullish
+2026-09-07T14:11:22.366212+01:00 | XNAS   | ACHAT_REJETÉ_CORR        | corrélation élevée avec EQQQ (déjà en position) | RSI=42.2 EMA=↗ MACD=- score=3/5 daily=bullish
