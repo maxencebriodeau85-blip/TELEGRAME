@@ -365,5 +365,17 @@
     "daily_trend": "bullish",
     "calibration_factor": 1.0,
     "timestamp": "2026-09-07T14:11:21.602740+01:00"
+  },
+  {
+    "symbol": "BTCE",
+    "side": "BUY",
+    "category": "₿ Crypto",
+    "price": 67.26000213623047,
+    "amount_eur": 4004.19,
+    "atr": 0.09623580492355144,
+    "confluence_score": 4,
+    "daily_trend": "bullish",
+    "calibration_factor": 1.0,
+    "timestamp": "2026-10-06T14:49:36.838817+01:00"
   }
 ]
