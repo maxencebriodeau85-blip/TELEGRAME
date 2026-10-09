@@ -130,3 +130,6 @@
 2026-10-07T15:07:10.322594+01:00 | NGAS   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=47.3 EMA=↗ MACD=- score=4/5 daily=bullish
 2026-10-07T15:07:10.322785+01:00 | IUSA   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=35.0 EMA=↗ MACD=- score=4/5 daily=bullish
 2026-10-08T15:17:30.875692+01:00 | NGAS   | ACHAT_REJETÉ_MAX_POS     | MAX_OPEN_POSITIONS=3 atteint | RSI=40.7 EMA=↗ MACD=- score=3/5 daily=bullish
+2026-10-09T15:02:14.910987+01:00 | EQQQ   | VENTE_SIGNAL             | PL=+602.62€ (+6.6%) | RSI=28.8 EMA=↘ MACD=↘ score=3/5 daily=bullish
+2026-10-09T15:02:15.333802+01:00 | IUSA   | ACHAT_REJETÉ_CORR        | limite 2 positions pour 📈 Actions | RSI=44.3 EMA=↗ MACD=↘ score=4/5 daily=bullish
+2026-10-09T15:02:16.609520+01:00 | CRUD   | ACHAT_ORDRE              | 7470.34€ prix=17.3530£ | RSI=41.0 EMA=↗ MACD=- score=3/5 daily=bullish

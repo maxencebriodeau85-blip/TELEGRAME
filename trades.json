@@ -377,5 +377,26 @@
     "daily_trend": "bullish",
     "calibration_factor": 1.0,
     "timestamp": "2026-10-06T14:49:36.838817+01:00"
+  },
+  {
+    "symbol": "EQQQ",
+    "side": "SELL",
+    "category": "📈 Actions",
+    "price": 569.82,
+    "pl": 602.62,
+    "reason": "EMA20↘EMA50 + MACD↘",
+    "timestamp": "2026-10-09T15:02:15.332686+01:00"
+  },
+  {
+    "symbol": "CRUD",
+    "side": "BUY",
+    "category": "🪙 Matières premières",
+    "price": 17.35300064086914,
+    "amount_eur": 7470.34,
+    "atr": 0.04380949714178941,
+    "confluence_score": 3,
+    "daily_trend": "bullish",
+    "calibration_factor": 1.0,
+    "timestamp": "2026-10-09T15:02:16.611948+01:00"
   }
 ]
