@@ -120,9 +120,11 @@ Tous les tickers Yahoo Finance standard sont également acceptés (`AAPL`, `MSFT
 
 ---
 
-## Déploiement sur Railway (gratuit)
+## Hébergement
 
-Railway permet d'héberger le bot gratuitement avec 500h/mois sur le plan Starter.
+Pour le worker de trading continu, suivre [DEPLOYMENT.md](DEPLOYMENT.md).
+Un hébergement permanent est nécessaire ; vérifier le tarif du fournisseur choisi.
+Les étapes Railway ci-dessous décrivent le bot de consultation historique.
 
 ### Étapes
 
@@ -163,3 +165,60 @@ investbot/
 ## Licence
 
 Usage personnel uniquement. Ce bot n'est pas destiné à fournir des conseils financiers professionnels.
+
+## Worker de trading continu
+
+Le guide complet de déploiement est dans [DEPLOYMENT.md](DEPLOYMENT.md).
+
+Le `Procfile` lance désormais `python continuous.py` (trading), et non `main.py`
+(bot de consultation). Python 3.11+ sur Linux est requis. Pour démarrer :
+
+```bash
+source .venv/bin/activate
+python continuous.py
+```
+
+Configurer de manière sécurisée `T212_API_KEY`, `T212_API_KEY_ID`,
+`TELEGRAM_BOT_TOKEN`, `CHAT_ID` et `T212_DEMO=true`. Ne pas lancer en parallèle
+le workflow GitHub Actions, `run_once.py`, `trading_bot.py` ou `main.py` avec le
+même compte/token : commandes consommées par plusieurs processus et ordres
+concurrents possibles. Le verrou protège seulement les workers partageant le
+même dossier sur la même machine.
+
+Le worker vérifie les commandes toutes les minutes et exécute la stratégie
+pendant les heures de marché définies dans `is_market_open`. Il reste actif
+hors marché, sans acheter. Une exception de cycle est journalisée par son type
+et le prochain cycle est tenté. `data/heartbeat.json` indique la fin du dernier
+cycle et les exceptions ; `cycle_completed` ne prouve ni la connectivité du
+broker ni l'exécution d'ordres. Arrêt propre avec SIGTERM/SIGINT.
+
+L'état est conservé dans `data/` par défaut ; définir `BOT_STATE_DIR` vers un
+volume persistant chez l'hébergeur. Avant migration, arrêter les anciens jobs
+et copier leurs fichiers d'état JSON et `decisions.log` dans ce volume : ne pas
+redémarrer avec un historique vide si des positions sont ouvertes. Configurer
+un seul worker, un redémarrage automatique après crash et une surveillance du
+heartbeat chez l'hébergeur. Un environnement de développement cloud ne garantit
+pas un hébergement permanent ; les processus ne survivent pas à sa fermeture.
+
+### Stratégie adaptative expérimentale
+
+`strategy.adaptive_demo: true` active en démo un classement par efficacité de
+tendance et momentum normalisé par volatilité. Les achats requièrent une tendance
+journalière haussière, un momentum MACD positif, un RSI entre 40 et 68 et un
+régime intraday en tendance. Les marchés sans direction, données invalides et
+volatilités extrêmes sont écartés. Le score est une heuristique explicable, pas
+une probabilité de gain ni un modèle entraîné. En réel, les conditions d'entrée
+historiques restent utilisées. Les sorties et plafonds existants sont conservés.
+
+Le dimensionnement couvre désormais la distance du stop fixe et celle de l'ATR,
+sans fallback d'achat sur ATR invalide. Un stop géré par le bot ne garantit pas
+le prix de sortie : gaps, indisponibilité réseau et frais peuvent augmenter la
+perte. Les POST broker ne sont pas rejoués automatiquement après erreur ambiguë ;
+vérifier l'état broker avant toute nouvelle tentative manuelle.
+
+Validation locale : `.venv/bin/python -m unittest discover -s tests -v`.
+Les tests n'envoient aucun ordre ni message. Le backtest historique existant utilise
+d'autres actifs et règles : il ne valide **pas** cette stratégie adaptative.
+Mesurer rendement net, drawdown, rotation et comparaison au buy-and-hold sur
+les mêmes actifs, hors échantillon, puis en démo avant d'envisager le réel.
+Aucun gain ou avantage de performance n'est établi par les tests unitaires.

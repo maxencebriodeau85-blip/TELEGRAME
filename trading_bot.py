@@ -13,6 +13,8 @@ Broker    : Trading 212 Invest (fractions, 0 commission)
 # SECTION 1 — IMPORTS & CONFIG
 # ============================================================
 
+from adaptive_strategy import assess_market
+
 import base64
 import json
 import logging
@@ -166,6 +168,14 @@ BOT_CONTROL_FILE     = Path("bot_control.json")       # pause/resume + first liv
 DECISIONS_LOG_FILE   = Path("decisions.log")          # audit trail des décisions
 CONFIG_FILE          = Path("config.yaml")            # paramètres mode live
 
+# Un worker continu utilise un volume dédié ; le mode GitHub Actions reste compatible.
+if os.getenv("BOT_STATE_DIR"):
+    _state_dir = Path(os.environ["BOT_STATE_DIR"])
+    _state_dir.mkdir(parents=True, exist_ok=True)
+    for _name in ("TRADES_FILE", "DAILY_PNL_FILE", "DISABLED_ASSETS_FILE", "POSITIONS_META_FILE",
+                  "RISK_STATS_FILE", "BOT_CONTROL_FILE", "DECISIONS_LOG_FILE"):
+        globals()[_name] = _state_dir / globals()[_name].name
+
 # Circuit breaker progressif (LIVE uniquement — DEMO utilise DAILY_LOSS_LIMIT_PCT)
 CB_PHASE1_PCT             = 0.03   # semaines 1-2 live : -3% par jour
 CB_NORMAL_PCT             = 0.05   # après 3 semaines profitables : -5% par jour
@@ -202,7 +212,7 @@ def load_json(path: Path, default) -> dict | list:
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            logger.error("Erreur lecture %s : %s", path, e)
+            raise RuntimeError(f"État illisible : {path.name}") from e
     return default
 
 
@@ -216,6 +226,7 @@ def save_json(path: Path, data) -> None:
     except Exception as e:
         logger.error("Erreur écriture %s : %s", path, e)
         tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"État non sauvegardé : {path.name}") from e
 
 
 def save_trade(trade: dict) -> None:
@@ -266,7 +277,7 @@ def update_max_price(symbol: str, current_price: float) -> float:
     meta  = load_positions_meta()
     entry = meta.get(symbol, {})
     prev_max = entry.get("max_price", current_price)
-    if current_price > prev_max:
+    if symbol not in meta or current_price > prev_max:
         entry["max_price"] = current_price
         meta[symbol] = entry
         save_positions_meta(meta)
@@ -365,7 +376,7 @@ def send_telegram(text: str) -> None:
                 return
             logger.warning("Telegram tentative %d/3 : %s", attempt + 1, resp.text[:100])
         except Exception as e:
-            logger.error("Telegram tentative %d/3 : %s", attempt + 1, e)
+            logger.error("Telegram tentative %d/3 : %s", attempt + 1, type(e).__name__)
 
 
 def _send_error_alert(msg: str) -> None:
@@ -512,7 +523,7 @@ def poll_telegram_commands() -> None:
         if changed:
             save_bot_control(ctrl)
     except Exception as e:
-        logger.warning("poll_telegram_commands : %s", e)
+        logger.warning("poll_telegram_commands : %s", type(e).__name__)
 
 
 def _calibration_factor() -> float:
@@ -579,7 +590,9 @@ def _t212_request(method: str, url: str, body: Optional[dict] = None) -> object:
     if body is not None:
         headers["Content-Type"] = "application/json"
     last_exc = None
-    for attempt, delay in enumerate([0, *T212_RETRY_DELAYS]):
+    # Un timeout après un POST peut cacher un ordre accepté : ne jamais le rejouer.
+    delays = [0, *T212_RETRY_DELAYS] if method.upper() == "GET" else [0]
+    for attempt, delay in enumerate(delays):
         if delay:
             time.sleep(delay)
         try:
@@ -598,7 +611,7 @@ def _t212_request(method: str, url: str, body: Optional[dict] = None) -> object:
             time.sleep(T212_RATE_SLEEP)
             return resp.json()
         except Exception as e:
-            logger.warning("T212 tentative %d/%d : %s", attempt + 1, len(T212_RETRY_DELAYS) + 1, e)
+            logger.warning("T212 tentative %d/%d : %s", attempt + 1, len(delays), e)
             last_exc = e
     logger.error("T212 %s échec : %s", url, last_exc)
     return _API_ERROR
@@ -609,9 +622,20 @@ def t212_get(endpoint: str) -> object:
 
 
 def t212_post(endpoint: str, body: dict) -> object:
-    return _t212_request("POST", f"{T212_BASE}{endpoint}", body=body)
-
-
+    ctrl = load_bot_control()
+    if ctrl.get("order_uncertain"):
+        logger.error("Ordre précédent non confirmé — vérifier le broker avant reprise")
+        return _API_ERROR
+    # Persist BEFORE the request: even a process crash must prevent resubmission.
+    ctrl["order_uncertain"] = {"ticker": body.get("ticker"),
+                               "created_at": datetime.now(ZoneInfo("UTC")).isoformat()}
+    save_bot_control(ctrl)
+    result = _t212_request("POST", f"{T212_BASE}{endpoint}", body=body)
+    if result is not _API_ERROR:
+        ctrl = load_bot_control()
+        ctrl.pop("order_uncertain", None)
+        save_bot_control(ctrl)
+    return result
 
 
 def get_account() -> dict:
@@ -779,15 +803,14 @@ def _get_fx_to_eur(ccy: str) -> float:
     pairs = {"£": "GBPEUR=X", "$": "USDEUR=X"}
     sym = pairs.get(ccy)
     if not sym:
-        _FX_CACHE[ccy] = 1.0
-        return 1.0
+        raise RuntimeError("Devise non prise en charge")
     try:
         df = yf.Ticker(sym).history(period="2d", interval="1d", auto_adjust=True)
-        rate = float(df["Close"].iloc[-1]) if not df.empty else 1.0
-    except Exception:
-        rate = 1.0
-    if not (rate > 0):  # protège contre NaN / 0 (division par zéro dans place_buy_order)
-        rate = 1.0
+        rate = float(df["Close"].iloc[-1]) if not df.empty else float("nan")
+    except Exception as exc:
+        raise RuntimeError("Taux de change indisponible") from exc
+    if not np.isfinite(rate) or rate <= 0:
+        raise RuntimeError("Taux de change invalide")
     _FX_CACHE[ccy] = rate
     logger.info("FX %s/EUR : %.4f", ccy, rate)
     return rate
@@ -871,7 +894,7 @@ def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     rsi   = 100 - (100 / (1 + rs))
     if rsi.isna().any():
         logger.debug("RSI NaN (série plate ou hors-marché) — remplacé par 50")
-        rsi = rsi.fillna(50.0)
+        rsi = rsi.mask((loss == 0) & (gain > 0), 100.0).fillna(50.0)
     return rsi
 
 
@@ -959,6 +982,7 @@ def get_signals(symbol: str, params_key: str = "commodities") -> Optional[dict]:
     )
 
     return {
+        "adaptive":        assess_market(df.iloc[:-1]),
         "symbol":          symbol,
         "price":           price,
         "ema20":           ema20_now,
@@ -1017,26 +1041,24 @@ def calculate_amount_atr(
     Formule : (portfolio × risk_pct) / (ATR × atr_mult) × prix = montant €
     Plafond  : min(résultat, portfolio × max_pct, buying_power)
 
-    Si ATR = 0 ou prix = 0 → fallback sur le % fixe de l'actif.
+    Le budget couvre aussi la distance du stop fixe réellement exécuté.
+    Données invalides → aucun achat.
     `cal` : facteur de calibration (0.5 pendant phase live initiale, 1.0 sinon).
     """
     sizing = SIZING_PARAMS[ASSETS[symbol]["params"]]
 
-    if not (atr > 0) or not (current_price > 0):  # attrape aussi NaN (NaN > 0 == False)
-        fallback = round(min(buying_power * ASSETS[symbol]["pct"] * cal, buying_power), 2)
-        logger.warning("%s : ATR invalide (%.6f) → fallback sizing fixe %.2f€", symbol, atr, fallback)
-        return fallback
+    inputs = [atr, current_price, buying_power, portfolio_value, cal]
+    if not all(np.isfinite(v) and v > 0 for v in inputs) or cal > 1:
+        logger.warning("%s : données de sizing invalides — aucun achat", symbol)
+        return 0.0
 
-    risk_amount    = portfolio_value * sizing["risk_pct"]
-    stop_distance  = atr * sizing["atr_mult"]
-    shares         = risk_amount / stop_distance
-    position_value = shares * current_price * cal
-
-    cap = min(
-        portfolio_value * sizing["max_pct"] * cal,
-        buying_power,
-    )
-    return round(min(position_value, cap), 2)
+    risk_amount = portfolio_value * sizing["risk_pct"] * cal
+    # Le stop exécuté est en pourcentage fixe : ne pas sous-estimer sa distance.
+    stop_fraction = max(atr * sizing["atr_mult"] / current_price, ASSETS[symbol]["stop"])
+    position_value = risk_amount / stop_fraction
+    cap = min(portfolio_value * sizing["max_pct"] * cal, buying_power)
+    # Arrondir vers le bas pour ne pas dépasser le budget de risque.
+    return float(np.floor(min(position_value, cap) * 100) / 100)
 
 
 def check_trailing_stop(position: dict, symbol: str) -> bool:
@@ -1045,11 +1067,11 @@ def check_trailing_stop(position: dict, symbol: str) -> bool:
     Prix de déclenchement : max_price_atteint × (1 - stop_loss_initial).
     Avant l'activation du trailing, c'est le stop-loss classique qui protège.
     """
-    if position["unrealized_plpc"] < TRAILING_ACTIVATION_PCT:
-        return False
-
     meta      = load_positions_meta()
     max_price = meta.get(symbol, {}).get("max_price", position["current_price"])
+    entry_price = position.get("avg_entry_price", 0)
+    if entry_price <= 0 or max_price < entry_price * (1 + TRAILING_ACTIVATION_PCT):
+        return False
     stop_pct  = ASSETS[symbol]["stop"]
     stop_price = max_price * (1 - stop_pct)
 
@@ -1222,6 +1244,15 @@ def should_buy(signals: dict, has_position: bool, force: bool = False) -> bool:
         return True
     if has_position:
         return False
+    adaptive_enabled = T212_DEMO and load_config().get("strategy", {}).get("adaptive_demo", False)
+    if adaptive_enabled:
+        assessment = signals.get("adaptive", {})
+        return bool(
+            assessment.get("entry_ok", False)
+            and signals["daily_trend"] == "bullish"
+            and signals["macd_bullish"]
+            and 40 <= signals["rsi"] <= 68
+        )
     if signals["daily_trend"] == "unknown":
         logger.warning(
             "%s : daily_trend=unknown (yfinance HS ou données insuffisantes) — "
@@ -1348,7 +1379,7 @@ def check_daily_loss_limit() -> bool:
 
 def _execute_trailing_stop(
     symbol: str, signals: dict, position: dict, max_price: float, mode: str
-) -> None:
+) -> bool:
     stop_pct    = ASSETS[symbol]["stop"]
     stop_price  = max_price * (1 - stop_pct)
     asset_cfg   = ASSETS[symbol]
@@ -1374,9 +1405,11 @@ def _execute_trailing_stop(
             "timestamp": datetime.now(ZoneInfo("Europe/London")).isoformat(),
         })
         logger.info("TRAILING STOP %s — PL=%.2f€", symbol, pl)
+        return True
+    return False
 
 
-def _execute_stop_loss(symbol: str, signals: dict, position: dict, mode: str) -> None:
+def _execute_stop_loss(symbol: str, signals: dict, position: dict, mode: str) -> bool:
     asset_cfg = ASSETS[symbol]
     stop_pct  = asset_cfg["stop"]
     logger.warning("%s stop-loss (%.2f%% / seuil %.0f%%)",
@@ -1399,9 +1432,11 @@ def _execute_stop_loss(symbol: str, signals: dict, position: dict, mode: str) ->
             "timestamp": datetime.now(ZoneInfo("Europe/London")).isoformat(),
         })
         logger.info("STOP-LOSS %s — PL=%.2f€", symbol, pl)
+        return True
+    return False
 
 
-def _execute_sell(symbol: str, signals: dict, position: dict, mode: str) -> None:
+def _execute_sell(symbol: str, signals: dict, position: dict, mode: str) -> bool:
     asset_cfg = ASSETS[symbol]
     if close_position(symbol):
         pl = position["unrealized_pl"]
@@ -1430,6 +1465,8 @@ def _execute_sell(symbol: str, signals: dict, position: dict, mode: str) -> None
             "timestamp": datetime.now(ZoneInfo("Europe/London")).isoformat(),
         })
         logger.info("VENTE %s — PL=%.2f€", symbol, pl)
+        return True
+    return False
 
 
 def _execute_buy(
@@ -1437,7 +1474,7 @@ def _execute_buy(
     buying_power: float, portfolio_value: float,
     invested: float,
     positions_map: dict, mode: str,
-) -> None:
+) -> bool:
     asset_cfg = ASSETS[symbol]
     stop_pct  = asset_cfg["stop"]
 
@@ -1452,7 +1489,7 @@ def _execute_buy(
             log_decision(symbol, "ACHAT_REJETÉ_LIMITE",
                 f"capital live {live_limit:.0f}€ atteint (investi={invested:.2f}€)", signals)
             logger.info("%s : achat bloqué — limite capital live %.0f€", symbol, live_limit)
-            return
+            return False
 
     cal = 1.0
     if TEST_TRADE:
@@ -1462,6 +1499,8 @@ def _execute_buy(
         amount = calculate_amount_atr(
             symbol, buying_power, portfolio_value, signals["atr"], signals["price"], cal=cal
         )
+    if not T212_DEMO:
+        amount = min(amount, max(0.0, live_limit - invested))
     if place_buy_order(symbol, amount, signals["price"]):
         fx          = _get_fx_to_eur(ASSETS[symbol]["ccy"])
         qty_approx  = amount / (signals["price"] * fx) if fx > 0 else 0
@@ -1470,12 +1509,12 @@ def _execute_buy(
         )
         # ATR sizing info
         sizing      = SIZING_PARAMS[asset_cfg["params"]]
-        atr_stop_eur = portfolio_value * sizing["risk_pct"]
+        atr_stop_eur = amount * stop_pct
         send_telegram(
             f"📥 <b>ACHAT {symbol}</b> [{mode}] {asset_cfg['category']}\n"
             f"Montant : <b>{amount:.2f} €</b> (≈ {qty_approx:.4f} actions)\n"
             f"Prix : {signals['price']:.4f} {asset_cfg['ccy']} | RSI : {signals['rsi']:.1f}/{signals['rsi_buy']}\n"
-            f"ATR : {signals['atr']:.4f} {asset_cfg['ccy']} | Risque max : {atr_stop_eur:.2f} €\n"
+            f"ATR : {signals['atr']:.4f} {asset_cfg['ccy']} | Perte théorique au stop (hors gap/frais) : {atr_stop_eur:.2f} €\n"
             f"EMA ✅ | MACD ↗ ✅ | Vol : {'✅' if signals['volume_ok'] else '⚠️'} | "
             f"Trend J : {daily_emoji}\n"
             f"Confluence : <b>{signals['confluence_score']}/5</b> | "
@@ -1516,6 +1555,8 @@ def _execute_buy(
         })
         logger.info("ACHAT %s — %.2f€ | ATR=%.4f | confluence=%d/5 | cal=%.0f%%",
                     symbol, amount, signals["atr"], signals["confluence_score"], cal * 100)
+        return True
+    return False
 
 
 def _handle_asset(
@@ -1546,18 +1587,15 @@ def _handle_asset(
 
         # 1. Trailing stop
         if check_trailing_stop(position, symbol):
-            _execute_trailing_stop(symbol, signals, position, max_price, mode)
-            return -1
+            return -int(_execute_trailing_stop(symbol, signals, position, max_price, mode))
 
         # 2. Stop-loss classique
         if check_stop_loss(position, symbol):
-            _execute_stop_loss(symbol, signals, position, mode)
-            return -1
+            return -int(_execute_stop_loss(symbol, signals, position, mode))
 
         # 3. Vente (2/3 critères)
         if should_sell(signals, has_position):
-            _execute_sell(symbol, signals, position, mode)
-            return -1
+            return -int(_execute_sell(symbol, signals, position, mode))
 
     else:
         # Nettoyage si la position a été fermée externalement
@@ -1578,8 +1616,7 @@ def _handle_asset(
                 logger.info("%s : achat bloqué — %s", symbol, reason)
                 return 0
 
-            _execute_buy(symbol, signals, buying_power, portfolio_value, invested, positions_map, mode)
-            return 1
+            return int(_execute_buy(symbol, signals, buying_power, portfolio_value, invested, positions_map, mode))
 
     logger.debug(
         "%s : %s | RSI=%.1f/%d | trend=%s | MACD↗=%s | vol=%s | daily=%s | score=%d/5",
@@ -1648,9 +1685,8 @@ def run_strategy() -> None:
         logger.error("yfinance inaccessible — aucun signal disponible pour %d actifs", len(active_symbols))
         _send_error_alert(
             f"yfinance inaccessible — 0/{len(active_symbols)} actifs ont renvoyé des données.\n"
-            "Le run est ignoré jusqu'à la prochaine exécution."
+            "Achats suspendus ; contrôle des stops avec les cours broker."
         )
-        return
 
     # ── Mode TEST_TRADE : forcer un achat de 1€ sur le premier actif sans position ──
     if TEST_TRADE:
@@ -1669,18 +1705,30 @@ def run_strategy() -> None:
         sig = all_signals.get(sym)
         if sig is None:
             return (2, 0)
-        return (0, 0) if sym in positions_map else (1, -sig.get("confluence_score", 0))
+        adaptive_enabled = T212_DEMO and load_config().get("strategy", {}).get("adaptive_demo", False)
+        quality = sig.get("adaptive", {}).get("quality", 0) if adaptive_enabled else sig.get("confluence_score", 0)
+        return (0, 0) if sym in positions_map else (1, -quality)
 
     for symbol in sorted(active_symbols, key=_sort_key):
         signals = all_signals.get(symbol)
         if signals is None:
             logger.warning("%s : données indisponibles", symbol)
+            position = positions_map.get(symbol)
+            if position:
+                max_price = update_max_price(symbol, position["current_price"])
+                price_only = {"price": position["current_price"]}
+                if check_trailing_stop(position, symbol):
+                    _execute_trailing_stop(symbol, price_only, position, max_price, mode)
+                elif check_stop_loss(position, symbol):
+                    _execute_stop_loss(symbol, price_only, position, mode)
             continue
         delta = _handle_asset(
             symbol, signals, positions_map.get(symbol), positions_map,
             buying_power, portfolio_value, invested, mode, open_count,
         )
         open_count += delta
+        if delta == -1:
+            positions_map.pop(symbol, None)
         if delta == 1:
             positions_map[symbol] = {"symbol": symbol}
             # Rafraîchir buying_power et invested — évite que le live_capital_limit
@@ -1689,6 +1737,9 @@ def run_strategy() -> None:
             if fresh:
                 buying_power = fresh["buying_power"]
                 invested     = fresh.get("invested", 0)
+            else:
+                logger.error("Solde non confirmé après achat — fin du cycle")
+                break
 
 
 def daily_summary() -> None:
@@ -1827,7 +1878,7 @@ def main() -> None:
             save_json(f, default)
     load_daily_pnl()
 
-    account = get_account()
+    account = get_account() or {}
     mode    = "🧪 DEMO TRADING" if T212_DEMO else "💰 TRADING RÉEL"
 
     categories: dict[str, list] = {}

@@ -1,0 +1,10 @@
+*
+!Dockerfile
+!requirements.txt
+!requirements.lock
+!*.py
+!config.yaml
+!.wheelhouse/
+!.wheelhouse/*.whl
+!tests/
+!tests/*.py

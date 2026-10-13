@@ -1,0 +1,30 @@
+services:
+  trading-bot:
+    build: .
+    image: telegrame-demo:local
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      T212_DEMO: "true"
+      TEST_TRADE: "false"
+      BOT_STATE_DIR: /data
+    volumes:
+      - bot-state:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+volumes:
+  bot-state:
