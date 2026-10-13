@@ -19,3 +19,7 @@ build/
 .vscode/
 .idea/
 *.swp
+
+# État du worker continu
+data/
+.wheelhouse/

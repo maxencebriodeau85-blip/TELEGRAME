@@ -1,89 +1,21 @@
-name: TradingBot — Trading 212
+name: TradingBot — validation hors connexion
 
 on:
   push:
-    branches:
-      - claude/telegram-investbot-zJXWJ
-    paths:
-      - '**.py'
-      - '.github/workflows/trading_bot.yml'
-      - 'requirements.txt'
-      - 'config.yaml'
-  schedule:
-    # Toutes les 10 min, 7h-17h UTC = couvre LSE (8h-16h30 London) et Xetra (9h-17h30 CET)
-    - cron: '*/10 7-17 * * 1-5'
+  pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: write
-
-# Un seul run à la fois — évite les races sur trades.json / daily_pnl.json
-# lors de runs cron successifs ou d'un workflow_dispatch concurrent.
-concurrency:
-  group: trading-bot
-  cancel-in-progress: false
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  contents: read
 
 jobs:
-  trade:
+  test:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Récupération du code et de l'état
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          ref: claude/telegram-investbot-zJXWJ
-          fetch-depth: 0
-
-      - name: Restaurer l'état bot (protège contre les pushs de code avec fichiers périmés)
-        run: |
-          # Pour chaque fichier d'état, restaurer depuis le dernier commit qui le modifie.
-          # Empêche qu'un push de code écrase daily_pnl.json avec une date ancienne
-          # et déclenche un faux "marché ouvert" en milieu de journée.
-          for f in daily_pnl.json trades.json disabled_assets.json positions_meta.json risk_stats.json bot_control.json decisions.log; do
-            last=$(git log --oneline -1 -- "$f" 2>/dev/null | cut -d' ' -f1)
-            if [ -n "$last" ]; then
-              git show "$last:$f" > "$f" 2>/dev/null || true
-            fi
-          done
-
-      - name: Installation Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Installation des dépendances
-        run: pip install -r requirements.txt
-
-      - name: Exécution de la stratégie
-        env:
-          T212_API_KEY: ${{ secrets.T212_API_KEY }}
-          T212_API_KEY_ID: ${{ secrets.T212_API_KEY_ID }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-          T212_DEMO: ${{ secrets.T212_DEMO || 'true' }}
-          DAILY_LOSS_LIMIT_PCT: '0.05'
-          DEBUG: 'false'
-          TEST_TRADE: 'false'
-        run: python run_once.py
-
-      - name: Sauvegarde de l'état (trades, PnL)
-        if: always()
-        run: |
-          git config user.email "trading-bot@users.noreply.github.com"
-          git config user.name "InvestBot"
-          # Valider les JSON avant commit — ne pas persister un état corrompu
-          for f in trades.json daily_pnl.json disabled_assets.json positions_meta.json risk_stats.json bot_control.json; do
-            if [ -f "$f" ]; then
-              python -m json.tool "$f" > /dev/null 2>&1 || { echo "ERREUR: $f est corrompu, commit annulé"; exit 1; }
-            fi
-          done
-          # Commiter D'ABORD les fichiers modifiés, PUIS puller
-          # (git pull --rebase échoue si des fichiers sont modifiés mais pas stagés)
-          git add trades.json daily_pnl.json disabled_assets.json positions_meta.json risk_stats.json bot_control.json decisions.log 2>/dev/null || true
-          git diff --staged --quiet || git commit -m "bot: mise à jour état [skip ci]"
-          git pull --rebase --autostash origin claude/telegram-investbot-zJXWJ
-          git push origin claude/telegram-investbot-zJXWJ
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.lock
+      - run: python -m unittest discover -s tests -v

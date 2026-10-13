@@ -10,3 +10,7 @@ risk:
   normal_cb_pct: 0.05              # après validation : -5% max/jour
   profitable_weeks_to_relax: 3     # semaines consécutives rentables pour passer à -5%
   cumulative_drawdown_limit: 0.15  # drawdown cumulé > -15% → arrêt complet + alerte urgente
+
+strategy:
+  # Heuristique offensive expérimentale, active uniquement lorsque T212_DEMO=true.
+  adaptive_demo: true

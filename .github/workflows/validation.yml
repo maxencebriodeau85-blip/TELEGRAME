@@ -1,0 +1,52 @@
+name: Validation du worker de trading
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.lock
+      - run: pip check
+      - run: python -m unittest discover -s tests -v
+      - name: Construire et tester le conteneur hors réseau
+        run: |
+          mkdir -p .wheelhouse
+          pip download --only-binary=:all: -r requirements.lock -d .wheelhouse
+          docker build --network=none --target test -t telegrame-demo:test .
+          docker build --network=none -t telegrame-demo:local .
+          docker run --rm --network none --read-only --tmpfs /tmp telegrame-demo:test python -m unittest discover -s tests -v
+
+  demo-preflight:
+    # Les PR externes n'ont aucun accès aux clés. Requêtes de lecture uniquement.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.lock
+      - name: Vérifier les services démo sans ordre ni message
+        env:
+          T212_API_KEY: ${{ secrets.T212_API_KEY }}
+          T212_API_KEY_ID: ${{ secrets.T212_API_KEY_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          T212_DEMO: 'true'
+          TEST_TRADE: 'false'
+        run: python preflight.py
